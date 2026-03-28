@@ -18,7 +18,38 @@ from aeroshape.geometry import NACAProfileGenerator, WingMeshFactory
 from aeroshape.mesh_utils import MeshTopologyManager
 from aeroshape.volume import VolumeCalculator
 from aeroshape.mass import MassPropertiesCalculator
-from aeroshape.exporter import ModelExporter
+from aeroshape import AirfoilProfile, SegmentSpec, MultiSegmentWing, NurbsExporter
+
+
+def _prepare_plot_data(triangles):
+    """Convert triangles to flat arrays for Plotly Mesh3d."""
+    x_pts, y_pts, z_pts = [], [], []
+    i_idx, j_idx, k_idx = [], [], []
+    for t_id, (A, B, C) in enumerate(triangles):
+        x_pts.extend([A[0], B[0], C[0]])
+        y_pts.extend([A[1], B[1], C[1]])
+        z_pts.extend([A[2], B[2], C[2]])
+        i_idx.append(t_id * 3)
+        j_idx.append(t_id * 3 + 1)
+        k_idx.append(t_id * 3 + 2)
+    return x_pts, y_pts, z_pts, i_idx, j_idx, k_idx
+
+
+def _save_local_file(filename, data):
+    """Save export data to Exports/ directory."""
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    exports_dir = os.path.join(base_dir, "Exports")
+    os.makedirs(exports_dir, exist_ok=True)
+    name, ext = os.path.splitext(filename)
+    file_path = os.path.join(exports_dir, filename)
+    counter = 1
+    while os.path.exists(file_path):
+        file_path = os.path.join(exports_dir, f"{name}_{counter}{ext}")
+        counter += 1
+    with open(file_path, "wb") as f:
+        f.write(data if isinstance(data, bytes) else data.encode('utf-8'))
+    return file_path
 
 st.set_page_config(
     page_title="Virtual Lab: Lifting Surfaces", layout="wide"
@@ -404,35 +435,41 @@ try:
 
     if st.sidebar.button(f"Save model as {export_format} to Exports/"):
         try:
+            # Build NURBS shape for export
+            root_prof = AirfoilProfile.from_naca4(
+                naca_root, num_points=num_points_profile)
+            tip_prof = AirfoilProfile.from_naca4(
+                naca_tip, num_points=num_points_profile)
+            _wing = MultiSegmentWing(name="GUI Wing")
+            _wing.add_segment(SegmentSpec(
+                span=semi_span, root_airfoil=root_prof,
+                tip_airfoil=tip_prof, root_chord=chord_root,
+                tip_chord=chord_tip, sweep_le_deg=sweep_angle,
+                num_sections=num_sections,
+            ))
+            _shape = _wing.to_occ_shape()
+
+            ext = export_format.lower()
+            fname = f"Wing_GVM.{ext}"
+            import tempfile, shutil
+            with tempfile.NamedTemporaryFile(
+                suffix=f".{ext}", delete=False
+            ) as tmp:
+                tmp_path = tmp.name
+
             if export_format == "STL":
-                data = ModelExporter.export_to_stl(
-                    triangles_for_display, volume_str, mass_str
-                )
-                saved_path = ModelExporter.save_local_file(
-                    'Wing_GVM.stl', data
-                )
+                NurbsExporter.to_stl(_shape, tmp_path)
             elif export_format == "IGES":
-                data = ModelExporter.export_to_iges(
-                    triangles_for_display,
-                    f"Wing_Vol_{volume_str}", X, Y, Z, is_solid
-                )
-                saved_path = ModelExporter.save_local_file(
-                    'Wing_GVM.iges', data
-                )
+                NurbsExporter.to_iges(_shape, tmp_path)
             else:
-                data = ModelExporter.export_to_step(
-                    triangles_for_display,
-                    f"Wing_Vol_{volume_str}", X, Y, Z, is_solid
-                )
-                saved_path = ModelExporter.save_local_file(
-                    'Wing_GVM.step', data
-                )
+                NurbsExporter.to_step(_shape, tmp_path)
+
+            with open(tmp_path, 'rb') as f:
+                data = f.read()
+            import os
+            os.remove(tmp_path)
+            saved_path = _save_local_file(fname, data)
             st.sidebar.success(f"Saved successfully to: {saved_path}")
-        except ImportError:
-            st.sidebar.error(
-                f"{export_format} export requires the gmsh library. "
-                "Install it with: `pip install gmsh`"
-            )
         except Exception as e:
             st.sidebar.error(f"Export failed: {e}")
 
@@ -441,7 +478,7 @@ try:
     st.subheader("3D Visualization")
 
     x_pts, y_pts, z_pts, i_idx, j_idx, k_idx = (
-        ModelExporter.prepare_plot_data(triangles_for_display)
+        _prepare_plot_data(triangles_for_display)
     )
 
     fig = go.Figure(data=[go.Mesh3d(

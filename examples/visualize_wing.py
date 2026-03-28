@@ -14,13 +14,15 @@ Usage:
 import argparse
 
 from aeroshape import (
-    WingMeshFactory,
-    MeshTopologyManager,
+    AirfoilProfile,
+    SegmentSpec,
+    MultiSegmentWing,
     VolumeCalculator,
     MassPropertiesCalculator,
     show_interactive,
     show_static,
 )
+from aeroshape.mesh_utils import MeshTopologyManager
 
 
 def main():
@@ -31,34 +33,35 @@ def main():
     parser.add_argument("--save", action="store_true", help="Save outputs to Exports/")
     args = parser.parse_args()
 
-    # ── Wing parameters ───────────────────────────────────────────
-    X, Y, Z = WingMeshFactory.create(
-        naca_root="2412",
-        naca_tip="2412",
-        semi_span=10.0,
-        chord_root=2.0,
-        chord_tip=1.0,
-        sweep_angle_deg=15.0,
-        num_points_profile=60,
-        num_sections=15,
-    )
+    # ── Wing definition ────────────────────────────────────────────
+    profile = AirfoilProfile.from_naca4("2412", num_points=60)
 
+    wing = MultiSegmentWing(name="NACA 2412 Wing")
+    wing.add_segment(SegmentSpec(
+        span=10.0,
+        root_airfoil=profile,
+        tip_airfoil=profile,
+        root_chord=2.0,
+        tip_chord=1.0,
+        sweep_le_deg=15.0,
+        num_sections=15,
+    ))
+
+    X, Y, Z = wing.to_vertex_grids(num_points_profile=60)
     triangles = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=True)
     volume = VolumeCalculator.compute_solid_volume(triangles)
 
-    density = 2700.0  # aluminum
+    density = 2700.0
     mass = volume * density
     cg, inertia, _ = MassPropertiesCalculator.compute_all(X, Y, Z, mass)
 
     print(f"Volume : {volume:.6f} m3")
     print(f"Mass   : {mass:.2f} kg")
     print(f"CG     : ({cg[0]:.4f}, {cg[1]:.4f}, {cg[2]:.4f})")
-    print(f"Ixx    : {inertia[0]:.2f}  Iyy: {inertia[1]:.2f}  Izz: {inertia[2]:.2f}")
     print()
 
     save_dir = "Exports" if args.save else None
 
-    # ── Decide what to show ───────────────────────────────────────
     show_mpl = args.static or args.both
     show_vtk = (not args.static) or args.both
 

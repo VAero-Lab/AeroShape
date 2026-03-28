@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aeroshape"
-version = "2.0.0"
-description = "CAD-free volume and mass properties computation for 3D lifting surfaces"
+version = "3.0.0"
+description = "NURBS-based geometry engine for aircraft design and analysis"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
@@ -24,6 +24,7 @@ classifiers = [
 
 dependencies = [
     "numpy>=1.20",
+    "cadquery-ocp>=7.7",
 ]
 
 [project.optional-dependencies]
@@ -32,15 +33,12 @@ gui = [
     "plotly>=5.0",
     "pandas>=1.3",
 ]
-export = [
-    "gmsh>=4.10",
-]
 viz = [
     "vedo>=2024.5",
     "matplotlib>=3.5",
 ]
 all = [
-    "aeroshape[gui,export,viz]",
+    "aeroshape[gui,viz]",
 ]
 
 [project.urls]

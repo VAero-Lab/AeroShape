@@ -1,66 +1,59 @@
-"""Export a wing design to STL, IGES, and STEP formats.
+"""Export a wing design to STEP, IGES, STL, and BREP formats.
 
-This example generates a wing mesh and exports it in all supported
-CAD formats, demonstrating the exporter module without requiring the GUI.
-
-- STL: ASCII mesh format (always available, requires only numpy)
-- IGES/STEP: NURBS-based CAD formats (require gmsh: pip install gmsh)
-
-The exported files can be imported into any CAD software (Fusion 360,
-SolidWorks, FreeCAD, etc.) for further analysis or manufacturing.
+Demonstrates the NURBS export pipeline using native OCC writers.
+STEP and IGES preserve exact NURBS geometry; STL is tessellated.
 """
 
 from aeroshape import (
-    WingMeshFactory,
-    MeshTopologyManager,
+    AirfoilProfile,
+    SegmentSpec,
+    MultiSegmentWing,
     VolumeCalculator,
-    ModelExporter,
+    NurbsExporter,
 )
+from aeroshape.mesh_utils import MeshTopologyManager
 
 
 def main():
-    # Generate wing
-    X, Y, Z = WingMeshFactory.create(
-        naca_root="2412", naca_tip="0012",
-        semi_span=8.0, chord_root=2.5, chord_tip=0.8,
-        sweep_angle_deg=20.0, num_points_profile=50, num_sections=20
-    )
+    # Define wing
+    root = AirfoilProfile.from_naca4("2412", num_points=50)
+    tip = AirfoilProfile.from_naca4("0012", num_points=50)
 
-    # Triangulate
+    wing = MultiSegmentWing(name="Export Wing")
+    wing.add_segment(SegmentSpec(
+        span=8.0,
+        root_airfoil=root,
+        tip_airfoil=tip,
+        root_chord=2.5,
+        tip_chord=0.8,
+        sweep_le_deg=20.0,
+        num_sections=20,
+    ))
+
+    # Compute properties for reference
+    X, Y, Z = wing.to_vertex_grids(num_points_profile=50)
     triangles = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=True)
-
-    # Compute properties
     volume = VolumeCalculator.compute_solid_volume(triangles)
-    density = 2700.0  # aluminum
-    mass = volume * density
+    mass = volume * 2700.0
 
     print(f"Wing volume: {volume:.6f} m^3")
     print(f"Wing mass (aluminum): {mass:.2f} kg")
-    print(f"Triangle count: {len(triangles)}")
 
-    vol_str = f"{volume:.6f}"
-    mass_str = f"{mass:.3f}"
+    # Build NURBS shape
+    shape = wing.to_occ_shape()
 
-    # --- STL export (always available) ---
-    stl_content = ModelExporter.export_to_stl(triangles, vol_str, mass_str)
-    saved = ModelExporter.save_local_file("wing_export.stl", stl_content)
-    print(f"\nSTL saved to: {saved}")
+    # Export to all formats
+    NurbsExporter.to_step(shape, "wing_export.step")
+    print("STEP exported: wing_export.step")
 
-    # --- IGES and STEP export (require gmsh) ---
-    try:
-        iges_data = ModelExporter.export_to_iges(
-            triangles, "wing", X, Y, Z, is_solid=True
-        )
-        saved = ModelExporter.save_local_file("wing_export.iges", iges_data)
-        print(f"IGES saved to: {saved}")
+    NurbsExporter.to_iges(shape, "wing_export.iges")
+    print("IGES exported: wing_export.iges")
 
-        step_data = ModelExporter.export_to_step(
-            triangles, "wing", X, Y, Z, is_solid=True
-        )
-        saved = ModelExporter.save_local_file("wing_export.step", step_data)
-        print(f"STEP saved to: {saved}")
-    except ImportError:
-        print("\nIGES/STEP export requires gmsh. Install with: pip install gmsh")
+    NurbsExporter.to_stl(shape, "wing_export.stl", linear_deflection=0.01)
+    print("STL exported:  wing_export.stl")
+
+    NurbsExporter.to_brep(shape, "wing_export.brep")
+    print("BREP exported: wing_export.brep")
 
 
 if __name__ == "__main__":

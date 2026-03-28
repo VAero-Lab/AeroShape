@@ -16,9 +16,9 @@ import numpy as np
 from aeroshape import (
     VolumeCalculator,
     MassPropertiesCalculator,
-    WingMeshFactory,
     MeshTopologyManager,
 )
+from aeroshape.geometry import WingMeshFactory
 
 
 def test_cube_volume():
