@@ -12,6 +12,8 @@ The BWB is modeled as a single multi-segment wing with:
 - Wingtip: tapered to thin tip
 """
 
+import os
+
 from aeroshape import (
     AirfoilProfile,
     SegmentSpec,
@@ -21,7 +23,9 @@ from aeroshape import (
     NurbsExporter,
     show_interactive,
 )
-from aeroshape.mesh_utils import MeshTopologyManager
+from aeroshape import MeshTopologyManager
+
+EXPORT_DIR = "Exports"
 
 
 def main():
@@ -109,9 +113,11 @@ def main():
           f"Izz={inertia[2]:.1f} kg*m^2")
 
     # ── NURBS export ──────────────────────────────────────────────
+    os.makedirs(EXPORT_DIR, exist_ok=True)
     shape = bwb.to_occ_shape()
-    NurbsExporter.to_step(shape, "blended_wing_body.step")
-    print("\n  STEP exported: blended_wing_body.step")
+    step_path = os.path.join(EXPORT_DIR, "blended_wing_body.step")
+    NurbsExporter.to_step(shape, step_path)
+    print(f"\n  STEP exported: {step_path}")
 
     # ── Visualize ─────────────────────────────────────────────────
     show_interactive(triangles, volume, mass, cg, inertia, title=bwb.name)

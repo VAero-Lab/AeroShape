@@ -22,7 +22,7 @@ from aeroshape import (
     show_interactive,
     show_static,
 )
-from aeroshape.mesh_utils import MeshTopologyManager
+from aeroshape import MeshTopologyManager
 
 
 def main():

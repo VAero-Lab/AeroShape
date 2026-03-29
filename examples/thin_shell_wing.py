@@ -17,7 +17,7 @@ from aeroshape import (
     MassPropertiesCalculator,
     show_interactive,
 )
-from aeroshape.mesh_utils import MeshTopologyManager
+from aeroshape import MeshTopologyManager
 
 
 def main():

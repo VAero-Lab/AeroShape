@@ -8,6 +8,8 @@ Demonstrates the NURBS-based pipeline:
 5. Visualize the result
 """
 
+import os
+
 from aeroshape import (
     AirfoilProfile,
     SegmentSpec,
@@ -17,7 +19,9 @@ from aeroshape import (
     NurbsExporter,
     show_interactive,
 )
-from aeroshape.mesh_utils import MeshTopologyManager
+from aeroshape import MeshTopologyManager
+
+EXPORT_DIR = "Exports"
 
 # ── 1. Define airfoil profiles ────────────────────────────────────
 root = AirfoilProfile.from_naca4("2412", num_points=60)
@@ -85,9 +89,11 @@ print(f"  Ixx={inertia[0]:.2f}, Iyy={inertia[1]:.2f}, Izz={inertia[2]:.2f} kg·m
 
 # ── 4. NURBS loft and STEP export ────────────────────────────────
 try:
+    os.makedirs(EXPORT_DIR, exist_ok=True)
     shape = wing.to_occ_shape()
-    NurbsExporter.to_step(shape, "cranked_wing.step")
-    print("\n  STEP exported: cranked_wing.step")
+    step_path = os.path.join(EXPORT_DIR, "cranked_wing.step")
+    NurbsExporter.to_step(shape, step_path)
+    print(f"\n  STEP exported: {step_path}")
 except ImportError:
     print("\n  (Skipping STEP export — OCP not installed)")
 

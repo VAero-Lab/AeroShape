@@ -15,6 +15,8 @@ Uses AircraftModel to assemble:
 """
 
 import math
+import os
+
 from aeroshape import (
     AirfoilProfile,
     SegmentSpec,
@@ -25,7 +27,9 @@ from aeroshape import (
     NurbsExporter,
     show_interactive,
 )
-from aeroshape.mesh_utils import MeshTopologyManager
+from aeroshape import MeshTopologyManager
+
+EXPORT_DIR = "Exports"
 
 
 def main():
@@ -138,9 +142,11 @@ def main():
     print(f"  Total mass:   {mass:.1f} kg")
 
     # ── NURBS export ─────────────────────────────────────────────
+    os.makedirs(EXPORT_DIR, exist_ok=True)
     shape = aircraft.to_occ_shape(fuse=False)
-    NurbsExporter.to_step(shape, "box_wing.step")
-    print("\n  STEP exported: box_wing.step")
+    step_path = os.path.join(EXPORT_DIR, "box_wing.step")
+    NurbsExporter.to_step(shape, step_path)
+    print(f"\n  STEP exported: {step_path}")
 
     # ── Visualize ────────────────────────────────────────────────
     cg = (0, 0, 0)

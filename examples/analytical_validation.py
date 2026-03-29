@@ -14,11 +14,13 @@ Reference:
 
 import numpy as np
 from aeroshape import (
+    AirfoilProfile,
+    SegmentSpec,
+    MultiSegmentWing,
     VolumeCalculator,
     MassPropertiesCalculator,
     MeshTopologyManager,
 )
-from aeroshape.geometry import WingMeshFactory
 
 
 def test_cube_volume():
@@ -78,12 +80,17 @@ def test_wing_volume_convergence():
     resolutions = [10, 20, 40, 80, 100]
     volumes = []
 
+    root = AirfoilProfile.from_naca4("2412", num_points=50)
+    tip = AirfoilProfile.from_naca4("2412", num_points=50)
+
     for n_pts in resolutions:
-        X, Y, Z = WingMeshFactory.create(
-            naca_root="2412", naca_tip="2412",
-            semi_span=1.0, chord_root=0.25, chord_tip=0.15,
-            sweep_angle_deg=0.0, num_points_profile=n_pts, num_sections=4
-        )
+        wing = MultiSegmentWing(name="convergence test")
+        wing.add_segment(SegmentSpec(
+            span=1.0, root_airfoil=root, tip_airfoil=tip,
+            root_chord=0.25, tip_chord=0.15,
+            sweep_le_deg=0.0, num_sections=4,
+        ))
+        X, Y, Z = wing.to_vertex_grids(num_points_profile=n_pts)
         tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=True)
         vol = VolumeCalculator.compute_solid_volume(tris)
         volumes.append(vol)
@@ -109,11 +116,14 @@ def test_mass_distribution():
     print("  TEST 3: Mass Distribution Model (Section 2.3.1)")
     print("=" * 60)
 
-    X, Y, Z = WingMeshFactory.create(
-        naca_root="0012", naca_tip="0012",
-        semi_span=10.0, chord_root=2.0, chord_tip=2.0,
-        sweep_angle_deg=0.0, num_points_profile=50, num_sections=10
-    )
+    sym_root = AirfoilProfile.from_naca4("0012", num_points=50)
+    sym_wing = MultiSegmentWing(name="symmetric test")
+    sym_wing.add_segment(SegmentSpec(
+        span=10.0, root_airfoil=sym_root, tip_airfoil=sym_root,
+        root_chord=2.0, tip_chord=2.0,
+        sweep_le_deg=0.0, num_sections=10,
+    ))
+    X, Y, Z = sym_wing.to_vertex_grids(num_points_profile=50)
 
     tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=True)
     volume = VolumeCalculator.compute_solid_volume(tris)

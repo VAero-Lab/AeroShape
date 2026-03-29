@@ -4,6 +4,8 @@ Demonstrates the NURBS export pipeline using native OCC writers.
 STEP and IGES preserve exact NURBS geometry; STL is tessellated.
 """
 
+import os
+
 from aeroshape import (
     AirfoilProfile,
     SegmentSpec,
@@ -11,7 +13,9 @@ from aeroshape import (
     VolumeCalculator,
     NurbsExporter,
 )
-from aeroshape.mesh_utils import MeshTopologyManager
+from aeroshape import MeshTopologyManager
+
+EXPORT_DIR = "Exports"
 
 
 def main():
@@ -43,17 +47,23 @@ def main():
     shape = wing.to_occ_shape()
 
     # Export to all formats
-    NurbsExporter.to_step(shape, "wing_export.step")
-    print("STEP exported: wing_export.step")
+    os.makedirs(EXPORT_DIR, exist_ok=True)
 
-    NurbsExporter.to_iges(shape, "wing_export.iges")
-    print("IGES exported: wing_export.iges")
+    step = os.path.join(EXPORT_DIR, "wing_export.step")
+    NurbsExporter.to_step(shape, step)
+    print(f"STEP exported: {step}")
 
-    NurbsExporter.to_stl(shape, "wing_export.stl", linear_deflection=0.01)
-    print("STL exported:  wing_export.stl")
+    iges = os.path.join(EXPORT_DIR, "wing_export.iges")
+    NurbsExporter.to_iges(shape, iges)
+    print(f"IGES exported: {iges}")
 
-    NurbsExporter.to_brep(shape, "wing_export.brep")
-    print("BREP exported: wing_export.brep")
+    stl = os.path.join(EXPORT_DIR, "wing_export.stl")
+    NurbsExporter.to_stl(shape, stl, linear_deflection=0.01)
+    print(f"STL exported:  {stl}")
+
+    brep = os.path.join(EXPORT_DIR, "wing_export.brep")
+    NurbsExporter.to_brep(shape, brep)
+    print(f"BREP exported: {brep}")
 
 
 if __name__ == "__main__":

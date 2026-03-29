@@ -14,6 +14,8 @@ Key benefits over the segment-based approach:
 - Guide curves give direct control over the planform shape
 """
 
+import os
+
 from aeroshape import (
     AirfoilProfile,
     MultiSegmentWing,
@@ -22,7 +24,9 @@ from aeroshape import (
     NurbsExporter,
     show_interactive,
 )
-from aeroshape.mesh_utils import MeshTopologyManager
+from aeroshape import MeshTopologyManager
+
+EXPORT_DIR = "Exports"
 
 
 def main():
@@ -105,9 +109,11 @@ def main():
     print("  boundaries).")
 
     # ── NURBS export ─────────────────────────────────────────────
+    os.makedirs(EXPORT_DIR, exist_ok=True)
     shape = bwb.to_occ_shape()
-    NurbsExporter.to_step(shape, "blended_wing_body_guided.step")
-    print("\n  STEP exported: blended_wing_body_guided.step")
+    step_path = os.path.join(EXPORT_DIR, "blended_wing_body_guided.step")
+    NurbsExporter.to_step(shape, step_path)
+    print(f"\n  STEP exported: {step_path}")
 
     # ── Visualize ────────────────────────────────────────────────
     show_interactive(triangles, volume, mass, cg, inertia,

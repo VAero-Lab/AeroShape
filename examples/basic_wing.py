@@ -11,6 +11,8 @@ Reference:
     Valencia et al., Aerospace Science and Technology 108 (2021) 106378.
 """
 
+import os
+
 from aeroshape import (
     AirfoilProfile,
     SegmentSpec,
@@ -20,7 +22,9 @@ from aeroshape import (
     NurbsExporter,
     show_interactive,
 )
-from aeroshape.mesh_utils import MeshTopologyManager
+from aeroshape import MeshTopologyManager
+
+EXPORT_DIR = "Exports"
 
 
 def main():
@@ -68,9 +72,11 @@ def main():
     print(f"  Izz = {Izz:.5f} kg*m^2")
 
     # Step 6: NURBS export
+    os.makedirs(EXPORT_DIR, exist_ok=True)
     shape = wing.to_occ_shape()
-    NurbsExporter.to_step(shape, "basic_wing.step")
-    print("\nSTEP exported: basic_wing.step")
+    step_path = os.path.join(EXPORT_DIR, "basic_wing.step")
+    NurbsExporter.to_step(shape, step_path)
+    print(f"\nSTEP exported: {step_path}")
 
     # Step 7: Visualization
     show_interactive(
