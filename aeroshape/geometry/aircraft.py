@@ -70,7 +70,7 @@ class AircraftModel:
         """
         from OCP.gp import gp_Vec, gp_Trsf
         from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
-        from aeroshape.cad.surfaces import NurbsSurfaceBuilder
+        from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
 
         shapes = []
         for entry in self.surfaces:
@@ -144,7 +144,7 @@ class AircraftModel:
         triangles : list of tuple
             Combined triangle list from all surfaces.
         """
-        from aeroshape.core.mesh import MeshTopologyManager
+        from aeroshape.analysis.mesh import MeshTopologyManager
 
         all_triangles = []
         for entry in self.surfaces:
@@ -188,7 +188,7 @@ class AircraftModel:
         """
         method = method.lower()
         if method == "occ":
-            from aeroshape.cad.utils import occ_mass_properties
+            from aeroshape.nurbs.utils import occ_mass_properties
             shape = self.to_occ_shape(fuse=False)
             props = occ_mass_properties(shape, density)
             com = props["center_of_mass"]
@@ -201,8 +201,8 @@ class AircraftModel:
                             imat[0, 1], imat[0, 2], imat[1, 2]),
             }
 
-        from aeroshape.core.volume import VolumeCalculator
-        from aeroshape.core.mass import MassPropertiesCalculator
+        from aeroshape.analysis.volume import VolumeCalculator
+        from aeroshape.analysis.mass import MassPropertiesCalculator
 
         grids = self.to_vertex_grids_list(num_points_profile,
                                            spanwise_clustering,
@@ -214,17 +214,22 @@ class AircraftModel:
                 for X, Y, Z, _ in grids
             )
         else:
-            triangles = self.to_triangles(
-                num_points_profile, closed=True,
-                spanwise_clustering=spanwise_clustering,
-                chordwise_clustering=chordwise_clustering)
-            volume = VolumeCalculator.compute_solid_volume(triangles)
+            # GVM Divergence-Theorem on NURBS-sampled geometry
+            from aeroshape.analysis.mesh import MeshTopologyManager
 
-        mass = volume * density
+            all_triangles = []
+            for X, Y, Z, _ in grids:
+                tris = MeshTopologyManager.get_wing_triangles(
+                    X, Y, Z, closed=True)
+                all_triangles.extend(tris)
+
+            volume = VolumeCalculator.compute_solid_volume(all_triangles)
 
         all_X = np.vstack([g[0] for g in grids])
         all_Y = np.vstack([g[1] for g in grids])
         all_Z = np.vstack([g[2] for g in grids])
+
+        mass = volume * density
         cg, inertia, _ = MassPropertiesCalculator.compute_all(
             all_X, all_Y, all_Z, mass)
         return {

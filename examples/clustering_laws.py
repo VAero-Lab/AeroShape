@@ -9,7 +9,7 @@ Uses matplotlib only — no OCC or vedo required.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from aeroshape.core.clustering import (
+from aeroshape.analysis.clustering import (
     uniform, cosine, half_cosine_start, half_cosine_end,
     tanh_one_sided, tanh_two_sided, exponential, vinokur,
 )

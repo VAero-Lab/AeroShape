@@ -116,17 +116,32 @@ def tessellate_shape(shape, linear_deflection=0.1, angular_deflection=0.5):
     return triangles
 
 
-def sample_shape_grid(shape, n_spanwise, n_chordwise):
-    """Sample an OCC shape on a regular (u, v) parametric grid.
+def sample_shape_grid(shape, n_spanwise, n_chordwise,
+                      spanwise_clustering=None, chordwise_clustering=None):
+    """Sample an OCC shape on a structured (u, v) parametric grid.
+
+    Extracts the lateral (non-end-cap) faces from a lofted shape, sorts
+    them by their spanwise extent, and evaluates each face on a parametric
+    grid.  Clustering distribution laws can be applied in both directions.
+
+    When the loft contains multiple lateral faces (e.g. one per segment),
+    the spanwise samples are distributed proportionally across them and
+    the results are stitched into a single contiguous grid.
 
     Parameters
     ----------
     shape : TopoDS_Shape
-        The OCC shape (should be a single lofted face/shell).
+        The OCC shape (lofted shell or solid).
     n_spanwise : int
-        Number of rows (v direction).
+        Total number of spanwise stations (v direction).
     n_chordwise : int
-        Number of columns (u direction).
+        Number of chordwise points per station (u direction).
+    spanwise_clustering : callable or None
+        Distribution law ``f(n) -> np.ndarray`` from
+        :mod:`aeroshape.analysis.clustering`.
+    chordwise_clustering : callable or None
+        Distribution law ``f(n) -> np.ndarray`` from
+        :mod:`aeroshape.analysis.clustering`.
 
     Returns
     -------
@@ -137,33 +152,120 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise):
     from OCP.TopAbs import TopAbs_FACE
     from OCP.TopoDS import TopoDS
     from OCP.BRepAdaptor import BRepAdaptor_Surface
+    from OCP.GProp import GProp_GProps
+    from OCP.BRepGProp import BRepGProp
 
+    # --- Collect all faces and identify lateral (skin) faces ---
+    faces_info = []
     explorer = TopExp_Explorer(shape, TopAbs_FACE)
-    if not explorer.More():
+    while explorer.More():
+        face = TopoDS.Face_s(explorer.Current())
+        adaptor = BRepAdaptor_Surface(face)
+
+        u_min = adaptor.FirstUParameter()
+        u_max = adaptor.LastUParameter()
+        v_min = adaptor.FirstVParameter()
+        v_max = adaptor.LastVParameter()
+
+        # Evaluate midpoint to determine spanwise (Y) range
+        pt_v0 = adaptor.Value(0.5 * (u_min + u_max), v_min)
+        pt_v1 = adaptor.Value(0.5 * (u_min + u_max), v_max)
+        y_span = abs(pt_v1.Y() - pt_v0.Y())
+
+        # Compute face area for end-cap filtering
+        gprops = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(face, gprops)
+        area = gprops.Mass()
+
+        faces_info.append({
+            'face': face,
+            'adaptor': adaptor,
+            'u_range': (u_min, u_max),
+            'v_range': (v_min, v_max),
+            'y_start': min(pt_v0.Y(), pt_v1.Y()),
+            'y_span': y_span,
+            'area': area,
+        })
+        explorer.Next()
+
+    if not faces_info:
         raise ValueError("Shape contains no faces")
 
-    face = TopoDS.Face_s(explorer.Current())
-    adaptor = BRepAdaptor_Surface(face)
+    # Filter out end-cap faces: keep only faces with significant span
+    max_span = max(fi['y_span'] for fi in faces_info)
+    if max_span > 1e-6:
+        lateral = [fi for fi in faces_info if fi['y_span'] > 0.1 * max_span]
+    else:
+        lateral = faces_info
 
-    u_min = adaptor.FirstUParameter()
-    u_max = adaptor.LastUParameter()
-    v_min = adaptor.FirstVParameter()
-    v_max = adaptor.LastVParameter()
+    if not lateral:
+        lateral = faces_info
 
-    u_vals = np.linspace(u_min, u_max, n_chordwise)
-    v_vals = np.linspace(v_min, v_max, n_spanwise)
+    # Sort lateral faces by their spanwise start position
+    lateral.sort(key=lambda fi: fi['y_start'])
 
-    X = np.zeros((n_spanwise, n_chordwise))
-    Y = np.zeros((n_spanwise, n_chordwise))
-    Z = np.zeros((n_spanwise, n_chordwise))
+    # --- Distribute spanwise samples across faces ---
+    total_span = sum(fi['y_span'] for fi in lateral)
 
-    for j, v in enumerate(v_vals):
-        for i, u in enumerate(u_vals):
-            pt = adaptor.Value(u, v)
-            X[j, i] = pt.X()
-            Y[j, i] = pt.Y()
-            Z[j, i] = pt.Z()
+    X_rows = []
+    Y_rows = []
+    Z_rows = []
 
+    # Compute how many spanwise samples go to each face
+    if len(lateral) == 1:
+        samples_per_face = [n_spanwise]
+    else:
+        samples_per_face = []
+        assigned = 0
+        for k, fi in enumerate(lateral):
+            if k == len(lateral) - 1:
+                n_face = n_spanwise - assigned
+            else:
+                frac = fi['y_span'] / total_span if total_span > 0 else 1.0
+                n_face = max(2, round(frac * n_spanwise))
+            samples_per_face.append(n_face)
+            assigned += n_face
+
+    for k, fi in enumerate(lateral):
+        adaptor = fi['adaptor']
+        u_min, u_max = fi['u_range']
+        v_min, v_max = fi['v_range']
+        n_face = samples_per_face[k]
+
+        # Chordwise parameter values (u direction)
+        if chordwise_clustering is not None:
+            u_norm = chordwise_clustering(n_chordwise)
+        else:
+            u_norm = np.linspace(0.0, 1.0, n_chordwise)
+        u_vals = u_min + u_norm * (u_max - u_min)
+
+        # Spanwise parameter values (v direction) for this face
+        if spanwise_clustering is not None:
+            v_norm_full = spanwise_clustering(n_face)
+        else:
+            v_norm_full = np.linspace(0.0, 1.0, n_face)
+        v_vals = v_min + v_norm_full * (v_max - v_min)
+
+        # Skip the first station if this is not the first face
+        # (it overlaps the last station of the previous face)
+        start_idx = 1 if k > 0 else 0
+
+        for j in range(start_idx, n_face):
+            row_x = np.zeros(n_chordwise)
+            row_y = np.zeros(n_chordwise)
+            row_z = np.zeros(n_chordwise)
+            for i in range(n_chordwise):
+                pt = adaptor.Value(u_vals[i], v_vals[j])
+                row_x[i] = pt.X()
+                row_y[i] = pt.Y()
+                row_z[i] = pt.Z()
+            X_rows.append(row_x)
+            Y_rows.append(row_y)
+            Z_rows.append(row_z)
+
+    X = np.array(X_rows)
+    Y = np.array(Y_rows)
+    Z = np.array(Z_rows)
     return X, Y, Z
 
 

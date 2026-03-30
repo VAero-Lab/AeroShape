@@ -101,7 +101,7 @@ class MultiSegmentWing:
         ----------
         spanwise_clustering : callable or None
             A distribution function ``f(n) -> np.ndarray`` from
-            :mod:`aeroshape.core.clustering` (e.g. ``cosine``,
+            :mod:`aeroshape.analysis.clustering` (e.g. ``cosine``,
             ``tanh_two_sided(2)``).  Applied within each segment to
             distribute sections non-uniformly along the span.  If *None*,
             uniform spacing is used.
@@ -188,7 +188,7 @@ class MultiSegmentWing:
         TopoDS_Shape
             Lofted NURBS solid/shell from pythonocc.
         """
-        from aeroshape.cad.surfaces import NurbsSurfaceBuilder
+        from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
         return NurbsSurfaceBuilder.build(self)
 
     # ── Vertex grids (GVM pipeline) ──────────────────────────────
@@ -196,14 +196,17 @@ class MultiSegmentWing:
     def to_vertex_grids(self, num_points_profile=50,
                          spanwise_clustering=None,
                          chordwise_clustering=None):
-        """Sample the wing into structured (X, Y, Z) vertex grids.
+        """Sample the NURBS lofted surface into structured (X, Y, Z) grids.
 
-        Produces matrices compatible with MeshTopologyManager and
-        MassPropertiesCalculator from the GVM pipeline, using the same
-        coordinate convention (X=chord, Y=span, Z=thickness).
+        Builds the NURBS loft through all section wires (same surface
+        as ``to_occ_shape``), then evaluates it at parametric (u, v)
+        coordinates.  This produces grids that follow the smooth C2
+        NURBS surface rather than linearly interpolating between
+        the defining section profiles.
 
-        Each section's airfoil is placed at its computed position with
-        sweep, dihedral, and twist applied.
+        The number of spanwise stations is determined by the section
+        frames, and clustering laws are applied in the parametric space
+        of the lofted surface.
 
         Parameters
         ----------
@@ -211,57 +214,43 @@ class MultiSegmentWing:
             Number of chordwise points per profile (parameter m).
         spanwise_clustering : callable or None
             Distribution law ``f(n) -> array`` from
-            :mod:`aeroshape.core.clustering`.  Controls how spanwise
-            sections are spaced within each segment.
+            :mod:`aeroshape.analysis.clustering`.
         chordwise_clustering : callable or None
             Distribution law ``f(n) -> array`` from
-            :mod:`aeroshape.core.clustering`.  Controls how chordwise
-            points are spaced along each profile (via arc-length
-            resampling).
+            :mod:`aeroshape.analysis.clustering`.
 
         Returns
         -------
         X, Y, Z : np.ndarray
-            Coordinate matrices of shape (n_total_sections, num_points_profile).
+            Coordinate matrices of shape (n_spanwise, num_points_profile).
         """
+        from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
+        from aeroshape.nurbs.utils import sample_shape_grid
+
+        # Build the NURBS loft as a shell (no end caps) so we get
+        # only the lateral surface for parametric sampling.
         frames = self.get_section_frames(spanwise_clustering)
-        n_sec = len(frames)
+        if len(frames) < 2:
+            raise ValueError("Need at least 2 section frames to loft")
 
-        X = np.zeros((n_sec, num_points_profile))
-        Y = np.zeros((n_sec, num_points_profile))
-        Z = np.zeros((n_sec, num_points_profile))
+        wires = []
+        for fr in frames:
+            wire = fr["airfoil"].to_occ_wire(
+                position=(fr["x_offset"], fr["y"], fr["z_offset"]),
+                twist_deg=fr["twist_deg"],
+                local_chord=fr["chord"],
+            )
+            wires.append(wire)
 
-        for j, fr in enumerate(frames):
-            airfoil = fr["airfoil"]
+        # Loft as shell (solid=False) to avoid end-cap faces
+        shell = NurbsSurfaceBuilder.loft(wires, solid=False, ruled=False)
 
-            # Resample airfoil to num_points_profile if needed
-            if len(airfoil.x) != num_points_profile or chordwise_clustering is not None:
-                airfoil = _resample_profile(airfoil, num_points_profile,
-                                            chordwise_clustering)
-
-            # Scale to local chord
-            if abs(airfoil.chord - fr["chord"]) > 1e-10:
-                airfoil = airfoil.scaled(fr["chord"])
-
-            px = airfoil.x.copy()
-            pz = airfoil.z.copy()
-
-            # Apply twist about the leading edge
-            if abs(fr["twist_deg"]) > 1e-10:
-                le_idx = np.argmin(px)
-                le_x, le_z = px[le_idx], pz[le_idx]
-                angle = math.radians(fr["twist_deg"])
-                cos_a, sin_a = math.cos(angle), math.sin(angle)
-                dx = px - le_x
-                dz = pz - le_z
-                px = le_x + dx * cos_a + dz * sin_a
-                pz = le_z - dx * sin_a + dz * cos_a
-
-            # Place at section position
-            X[j, :] = px + fr["x_offset"]
-            Y[j, :] = fr["y"]
-            Z[j, :] = pz + fr["z_offset"]
-
+        n_spanwise = len(frames)
+        X, Y, Z = sample_shape_grid(
+            shell, n_spanwise, num_points_profile,
+            spanwise_clustering=spanwise_clustering,
+            chordwise_clustering=chordwise_clustering,
+        )
         return X, Y, Z
 
     # ── Guide-curve construction ──────────────────────────────────
@@ -367,7 +356,7 @@ class MultiSegmentWing:
         triangles : list of tuple
             Triangle list suitable for VolumeCalculator.
         """
-        from aeroshape.core.mesh import MeshTopologyManager
+        from aeroshape.analysis.mesh import MeshTopologyManager
 
         X, Y, Z = self.to_vertex_grids(num_points_profile,
                                          spanwise_clustering,
@@ -406,7 +395,7 @@ class MultiSegmentWing:
         """
         method = method.lower()
         if method == "occ":
-            from aeroshape.cad.utils import occ_mass_properties
+            from aeroshape.nurbs.utils import occ_mass_properties
             shape = self.to_occ_shape()
             props = occ_mass_properties(shape, density)
             com = props["center_of_mass"]
@@ -419,8 +408,8 @@ class MultiSegmentWing:
                             imat[0, 1], imat[0, 2], imat[1, 2]),
             }
 
-        from aeroshape.core.volume import VolumeCalculator
-        from aeroshape.core.mass import MassPropertiesCalculator
+        from aeroshape.analysis.volume import VolumeCalculator
+        from aeroshape.analysis.mass import MassPropertiesCalculator
 
         X, Y, Z = self.to_vertex_grids(num_points_profile,
                                          spanwise_clustering,
@@ -429,14 +418,16 @@ class MultiSegmentWing:
         if method == "sai":
             volume = VolumeCalculator.compute_solid_volume_sai(X, Y, Z)
         else:
-            # GVM Divergence-Theorem
-            from aeroshape.core.mesh import MeshTopologyManager
+            # GVM Divergence-Theorem on NURBS-sampled geometry
+            from aeroshape.analysis.mesh import MeshTopologyManager
             triangles = MeshTopologyManager.get_wing_triangles(
                 X, Y, Z, closed=True)
             volume = VolumeCalculator.compute_solid_volume(triangles)
 
         mass = volume * density
-        cg, inertia, _ = MassPropertiesCalculator.compute_all(X, Y, Z, mass)
+        cg, inertia, _ = MassPropertiesCalculator.compute_all(
+            X, Y, Z, mass)
+
         return {
             "volume": volume,
             "mass": mass,
@@ -500,7 +491,7 @@ def _resample_coords(x: np.ndarray, z: np.ndarray, n: int, clustering=None):
     n : int
         Target number of points.
     clustering : callable or None
-        Distribution law ``f(n) -> array`` from :mod:`aeroshape.core.clustering`.
+        Distribution law ``f(n) -> array`` from :mod:`aeroshape.analysis.clustering`.
         If *None*, uniform spacing along arc length is used.
     """
     dx = np.diff(x)

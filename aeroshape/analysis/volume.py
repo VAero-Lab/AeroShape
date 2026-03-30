@@ -95,7 +95,7 @@ class VolumeCalculator:
         --------
         compute_shell_volume_unfolding : Simpler approximation method.
         """
-        from aeroshape.core.mesh import MeshTopologyManager
+        from aeroshape.analysis.mesh import MeshTopologyManager
 
         n_sec, m_pts = X.shape
 

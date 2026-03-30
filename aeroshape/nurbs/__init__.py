@@ -1,8 +1,8 @@
 """CAD/NURBS operations and export."""
 
-from aeroshape.cad.surfaces import NurbsSurfaceBuilder
-from aeroshape.cad.export import NurbsExporter
-from aeroshape.cad.utils import (
+from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
+from aeroshape.nurbs.export import NurbsExporter
+from aeroshape.nurbs.utils import (
     tessellate_shape,
     sample_shape_grid,
     occ_mass_properties,
