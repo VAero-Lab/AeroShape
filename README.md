@@ -1,11 +1,10 @@
 # AeroShape: Robust 3D Aircraft Geometry Modeling Framework
 
-AeroShape is an open-source Python package designed as a general-purpose 3D aircraft geometry modeling framework. It provides robust parametric NURBS surface generation for lifting surfaces and implements the **GVM (Geometry, Volume, and Mass)** methodology for computing volume, mass, center of gravity, and moments of inertia.
-Based on the paper:
+AeroShape is an open-source Python package designed as a general-purpose 3D aircraft geometry modeling framework. It provides robust parametric NURBS surface generation for lifting surfaces and implements the **GVM (Geometry, Volume, and Mass)** methodology for computing volume, mass, center of gravity, and moments of inertia, based on the paper:
 
 > Valencia, E., Alulema, V., Hidalgo, V., Rodriguez, D. (2021). _A CAD-free methodology for volume and mass properties computation of 3-D lifting surfaces and wing-box structures._ Aerospace Science and Technology, 108, 106378.
 
-AeroShape also support volume and mass properties calculation using the OpenCascade Library. Tests have shown that GVM is 10 to 20 times faster than OpenCascade, but OpenCascade is more robust and accurate for complex geometries.
+AeroShape also support volume and mass properties computation using the OpenCascade Library. Tests have shown that GVM is 15x to 20x faster than OpenCascade, but OpenCascade is more robust and accurate for complex geometries.
 
 As the library continues to expand, AeroShape aims to become a fully comprehensive 3D geometry engine for all aircraft components (fuselages, nacelles, etc.), capable of generating geometry representations for various aerodynamic structural analyses, CAD export, and design optimization.
 
@@ -19,17 +18,17 @@ GitHub natively supports interactive 3D viewing for STL files. Click the link be
 
 ## Features
 
-- **NACA Profile Generation** — 4-digit NACA airfoil profiles with configurable point-distribution laws
-- **3D Wing Mesh Construction** — Multi-segment wings with sweep, taper, dihedral, and twist
-- **Volume Computation** — Divergence Theorem on triangulated surfaces (Eq. 2)
-- **Thin-Shell Volume** — Offset (exact) and unfolding (approximate) approaches (Fig. 4)
-- **Mass Distribution** — Chord-thickness based particle model (Eqs. 4–9)
-- **Center of Mass & Inertia Tensor** — Full 6-DOF inertial properties (Eqs. 10–14)
+- **Airfoil Generation** — 4 digit NACA airfoil with configurable point-distribution laws and airfoil from file
+- **3D Wing Mesh Construction** — Multi-segment wings with span, sweep, taper, dihedral, and twist
+- **3D Methods for Geometry** — NURBS-based Loft (with/out guided curves), sweep and extrude
+- **Volume Computation** — GVM method (Divergence theorem of faceted surfaces) and OpenCascade API
+- **Thin-Shell Volume** — GVM methods: Offset (exact) and unfolding (approximate) approaches (Paper Fig. 4)
+- **Center of Mass & Inertia Tensor** — Full 6-DOF inertial properties
 - **Aircraft Assembly** — Multi-surface configurations via `AircraftModel`
 - **CAD Export** — STEP, IGES, STL, and BREP formats (via OpenCASCADE / OCP)
 - **Clustering Laws** — Uniform, cosine, tanh, exponential, Vinokur point distributions
 - **Visualization** — Interactive 3D viewer (vedo/VTK) and static matplotlib figures
-- **Interactive GUI** — Streamlit-based dashboard with 3D visualization
+- **Interactive GUI** — Beginner Streamlit-based dashboard with 3D visualization
 
 ---
 
