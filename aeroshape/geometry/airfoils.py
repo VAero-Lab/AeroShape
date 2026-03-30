@@ -359,3 +359,142 @@ class AirfoilProfile:
         edge = BRepBuilderAPI_MakeEdge(bspline.Curve()).Edge()
         wire = BRepBuilderAPI_MakeWire(edge).Wire()
         return wire
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  NurbsProfile dataclass
+# ═══════════════════════════════════════════════════════════════════
+
+@dataclass
+class NurbsProfile:
+    """A highly controllable 2D NURBS airfoil profile.
+
+    Attributes
+    ----------
+    poles : np.ndarray
+        (N, 2) array of control points (x, z).
+    knots : list or np.ndarray
+        Knot vector (must be strictly increasing).
+    multiplicities : list or np.ndarray
+        Multiplicities for each knot.
+    degree : int
+        Degree of the B-spline basis functions.
+    weights : list or np.ndarray or None
+        Optional weights for a rational B-spline.
+    name : str
+        Descriptive name.
+    chord : float
+        Reference chord length these coordinates were generated at.
+    num_eval_points : int
+        Number of points to evaluate the curve at for the x and z arrays.
+    """
+    poles: np.ndarray
+    knots: np.ndarray
+    multiplicities: np.ndarray
+    degree: int
+    weights: np.ndarray = None
+    name: str = ""
+    chord: float = 1.0
+    num_eval_points: int = 100
+
+    def __post_init__(self):
+        # Evaluate curve parametrically to fill x and z attributes
+        # so this class can be used seamlessly in GVM
+        self.poles = np.asarray(self.poles, dtype=float)
+        self.knots = np.asarray(self.knots, dtype=float)
+        self.multiplicities = np.asarray(self.multiplicities, dtype=int)
+        if self.weights is not None:
+            self.weights = np.asarray(self.weights, dtype=float)
+
+        from OCP.Geom import Geom_BSplineCurve
+        from OCP.gp import gp_Pnt
+        from OCP.TColgp import TColgp_Array1OfPnt
+        from OCP.TColStd import TColStd_Array1OfReal, TColStd_Array1OfInteger
+
+        n_poles = len(self.poles)
+        arr_poles = TColgp_Array1OfPnt(1, n_poles)
+        for i, (x, z) in enumerate(self.poles):
+            arr_poles.SetValue(i + 1, gp_Pnt(x, 0.0, z))
+
+        n_knots = len(self.knots)
+        arr_knots = TColStd_Array1OfReal(1, n_knots)
+        for i, k in enumerate(self.knots):
+            arr_knots.SetValue(i + 1, float(k))
+
+        arr_mults = TColStd_Array1OfInteger(1, n_knots)
+        for i, m in enumerate(self.multiplicities):
+            arr_mults.SetValue(i + 1, int(m))
+
+        if self.weights is not None:
+            arr_weights = TColStd_Array1OfReal(1, n_poles)
+            for i, w in enumerate(self.weights):
+                arr_weights.SetValue(i + 1, float(w))
+            curve = Geom_BSplineCurve(arr_poles, arr_weights, arr_knots, arr_mults, self.degree)
+        else:
+            curve = Geom_BSplineCurve(arr_poles, arr_knots, arr_mults, self.degree)
+
+        u_min = curve.FirstParameter()
+        u_max = curve.LastParameter()
+        
+        # you need a cosine clustering for evaluation to get denser points at LE/TE
+        beta = np.linspace(0, math.pi, self.num_eval_points)
+        u_norm = 0.5 * (1.0 - np.cos(beta))
+        u_vals = u_min + u_norm * (u_max - u_min)
+
+        x_list, z_list = [], []
+        for u in u_vals:
+            pt = curve.Value(u)
+            x_list.append(pt.X())
+            z_list.append(pt.Z())
+
+        self.x = np.array(x_list)
+        self.z = np.array(z_list)
+
+    def scaled(self, new_chord):
+        """Return a copy scaled to a different chord length."""
+        factor = new_chord / self.chord
+        weights_copy = self.weights.copy() if self.weights is not None else None
+        return NurbsProfile(
+            poles=self.poles * factor,
+            knots=self.knots,
+            multiplicities=self.multiplicities,
+            degree=self.degree,
+            weights=weights_copy,
+            name=self.name,
+            chord=new_chord,
+            num_eval_points=self.num_eval_points
+        )
+
+    def to_occ_wire(self, position=(0.0, 0.0, 0.0), twist_deg=0.0, local_chord=None):
+        from aeroshape.nurbs.utils import make_bspline_from_control_points
+        
+        if local_chord is not None and abs(local_chord - self.chord) > 1e-10:
+            profile = self.scaled(local_chord)
+        else:
+            profile = self
+
+        px, pz = profile.poles[:, 0].copy(), profile.poles[:, 1].copy()
+
+        if abs(twist_deg) > 1e-10:
+            le_idx = np.argmin(px)
+            le_x, le_z = px[le_idx], pz[le_idx]
+            angle = math.radians(twist_deg)
+            cos_a, sin_a = math.cos(angle), math.sin(angle)
+            dx = px - le_x
+            dz = pz - le_z
+            px = le_x + dx * cos_a + dz * sin_a
+            pz = le_z - dx * sin_a + dz * cos_a
+
+        x_off, y_pos, z_off = position
+        poles_3d = [(px[i] + x_off, y_pos, pz[i] + z_off) for i in range(len(px))]
+        weights_list = list(self.weights) if self.weights is not None else None
+
+        wire = make_bspline_from_control_points(
+            poles_3d=poles_3d,
+            knots=list(self.knots),
+            multiplicities=list(self.multiplicities),
+            degree=self.degree,
+            weights=weights_list
+        )
+        return wire
+

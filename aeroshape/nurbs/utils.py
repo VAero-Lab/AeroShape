@@ -59,6 +59,68 @@ def make_line_wire(p1, p2):
 
 # ── Tessellation ────────────────────────────────────────────────
 
+def make_bspline_from_control_points(poles_3d, knots, multiplicities, degree,
+                                     weights=None, periodic=False):
+    """Create a B-spline wire explicitly from control points and knots.
+
+    Parameters
+    ----------
+    poles_3d : list of tuple
+        [(x, y, z), ...] control points (poles).
+    knots : list of float
+        Knot vector values (must be strictly increasing).
+    multiplicities : list of int
+        Multiplicities for each knot in the knot vector.
+    degree : int
+        Degree of the B-spline basis functions.
+    weights : list of float, optional
+        Weights for rational B-splines. If None (default), creates a
+        non-rational B-spline.
+    periodic : bool
+        If True, builds a periodic (closed) curve. Default False.
+
+    Returns
+    -------
+    TopoDS_Wire
+    """
+    from OCP.gp import gp_Pnt
+    from OCP.Geom import Geom_BSplineCurve
+    from OCP.TColgp import TColgp_Array1OfPnt
+    from OCP.TColStd import TColStd_Array1OfReal, TColStd_Array1OfInteger
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire
+
+    n_poles = len(poles_3d)
+    arr_poles = TColgp_Array1OfPnt(1, n_poles)
+    for i, (x, y, z) in enumerate(poles_3d):
+        arr_poles.SetValue(i + 1, gp_Pnt(float(x), float(y), float(z)))
+
+    n_knots = len(knots)
+    arr_knots = TColStd_Array1OfReal(1, n_knots)
+    for i, k in enumerate(knots):
+        arr_knots.SetValue(i + 1, float(k))
+
+    arr_mults = TColStd_Array1OfInteger(1, n_knots)
+    for i, m in enumerate(multiplicities):
+        arr_mults.SetValue(i + 1, int(m))
+
+    if weights is not None:
+        if len(weights) != n_poles:
+            raise ValueError("weights array must match poles array length")
+        arr_weights = TColStd_Array1OfReal(1, n_poles)
+        for i, w in enumerate(weights):
+            arr_weights.SetValue(i + 1, float(w))
+        
+        curve = Geom_BSplineCurve(arr_poles, arr_weights, arr_knots, arr_mults, degree, periodic)
+    else:
+        curve = Geom_BSplineCurve(arr_poles, arr_knots, arr_mults, degree, periodic)
+
+    edge = BRepBuilderAPI_MakeEdge(curve).Edge()
+    wire = BRepBuilderAPI_MakeWire(edge).Wire()
+    return wire
+
+
+# ── Tessellation ────────────────────────────────────────────────
+
 def tessellate_shape(shape, linear_deflection=0.1, angular_deflection=0.5):
     """Tessellate an OCC shape into triangles.
 
@@ -117,7 +179,8 @@ def tessellate_shape(shape, linear_deflection=0.1, angular_deflection=0.5):
 
 
 def sample_shape_grid(shape, n_spanwise, n_chordwise,
-                      spanwise_clustering=None, chordwise_clustering=None):
+                      spanwise_clustering=None, chordwise_clustering=None,
+                      axis='Y'):
     """Sample an OCC shape on a structured (u, v) parametric grid.
 
     Extracts the lateral (non-end-cap) faces from a lofted shape, sorts
@@ -133,15 +196,17 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
     shape : TopoDS_Shape
         The OCC shape (lofted shell or solid).
     n_spanwise : int
-        Total number of spanwise stations (v direction).
+        Total number of spanwise/lengthwise stations (v direction).
     n_chordwise : int
-        Number of chordwise points per station (u direction).
+        Number of chordwise/profile points per station (u direction).
     spanwise_clustering : callable or None
         Distribution law ``f(n) -> np.ndarray`` from
         :mod:`aeroshape.analysis.clustering`.
     chordwise_clustering : callable or None
         Distribution law ``f(n) -> np.ndarray`` from
         :mod:`aeroshape.analysis.clustering`.
+    axis : str
+        The primary axis of the component ('X' for fuselages, 'Y' for wings).
 
     Returns
     -------
@@ -155,6 +220,8 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
     from OCP.GProp import GProp_GProps
     from OCP.BRepGProp import BRepGProp
 
+    axis = axis.upper()
+
     # --- Collect all faces and identify lateral (skin) faces ---
     faces_info = []
     explorer = TopExp_Explorer(shape, TopAbs_FACE)
@@ -167,10 +234,19 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
         v_min = adaptor.FirstVParameter()
         v_max = adaptor.LastVParameter()
 
-        # Evaluate midpoint to determine spanwise (Y) range
+        # Evaluate midpoint to determine spanwise range
         pt_v0 = adaptor.Value(0.5 * (u_min + u_max), v_min)
         pt_v1 = adaptor.Value(0.5 * (u_min + u_max), v_max)
-        y_span = abs(pt_v1.Y() - pt_v0.Y())
+        
+        if axis == 'X':
+            span = abs(pt_v1.X() - pt_v0.X())
+            start_pos = min(pt_v0.X(), pt_v1.X())
+        elif axis == 'Z':
+            span = abs(pt_v1.Z() - pt_v0.Z())
+            start_pos = min(pt_v0.Z(), pt_v1.Z())
+        else:
+            span = abs(pt_v1.Y() - pt_v0.Y())
+            start_pos = min(pt_v0.Y(), pt_v1.Y())
 
         # Compute face area for end-cap filtering
         gprops = GProp_GProps()
@@ -182,8 +258,8 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
             'adaptor': adaptor,
             'u_range': (u_min, u_max),
             'v_range': (v_min, v_max),
-            'y_start': min(pt_v0.Y(), pt_v1.Y()),
-            'y_span': y_span,
+            'start_pos': start_pos,
+            'span': span,
             'area': area,
         })
         explorer.Next()
@@ -192,9 +268,9 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
         raise ValueError("Shape contains no faces")
 
     # Filter out end-cap faces: keep only faces with significant span
-    max_span = max(fi['y_span'] for fi in faces_info)
+    max_span = max(fi['span'] for fi in faces_info)
     if max_span > 1e-6:
-        lateral = [fi for fi in faces_info if fi['y_span'] > 0.1 * max_span]
+        lateral = [fi for fi in faces_info if fi['span'] > 0.1 * max_span]
     else:
         lateral = faces_info
 
@@ -202,10 +278,10 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
         lateral = faces_info
 
     # Sort lateral faces by their spanwise start position
-    lateral.sort(key=lambda fi: fi['y_start'])
+    lateral.sort(key=lambda fi: fi['start_pos'])
 
     # --- Distribute spanwise samples across faces ---
-    total_span = sum(fi['y_span'] for fi in lateral)
+    total_span = sum(fi['span'] for fi in lateral)
 
     X_rows = []
     Y_rows = []
@@ -221,7 +297,7 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
             if k == len(lateral) - 1:
                 n_face = n_spanwise - assigned
             else:
-                frac = fi['y_span'] / total_span if total_span > 0 else 1.0
+                frac = fi['span'] / total_span if total_span > 0 else 1.0
                 n_face = max(2, round(frac * n_spanwise))
             samples_per_face.append(n_face)
             assigned += n_face

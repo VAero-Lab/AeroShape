@@ -32,7 +32,7 @@ EXPORT_DIR = "Exports"
 def main():
     # ── Airfoil profiles at key spanwise stations ────────────────
     # Center body: very thick symmetric (cabin volume)
-    center = AirfoilProfile.from_naca4("0030", num_points=60)
+    center = AirfoilProfile.from_naca4("0025", num_points=60)
     # Inner transition: thick cambered
     transition = AirfoilProfile.from_naca4("4418", num_points=60)
     # Outboard root: conventional

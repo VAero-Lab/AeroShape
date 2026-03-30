@@ -227,7 +227,7 @@ class MultiSegmentWing:
         from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
         from aeroshape.nurbs.utils import sample_shape_grid
 
-        # Build the NURBS loft as a shell (no end caps) so we get
+        # Build the NURBS loft as a shell (no end caps) so you get
         # only the lateral surface for parametric sampling.
         frames = self.get_section_frames(spanwise_clustering)
         if len(frames) < 2:

@@ -19,11 +19,9 @@ import numpy as np
 class AircraftModel:
     """Multi-body aircraft assembly.
 
-    Holds multiple lifting surfaces (wings, tails, canards, struts)
-    and combines them into a single OCC compound shape for export
+    Holds multiple lifting surfaces (wings, tails) and fuselages,
+    combining them into a single OCC compound shape for export
     and analysis.
-
-    Each surface is a MultiSegmentWing with a 3D placement offset.
 
     Attributes
     ----------
@@ -32,11 +30,18 @@ class AircraftModel:
     surfaces : list of dict
         Each dict: {"wing": MultiSegmentWing, "origin": (x, y, z)}.
         origin translates the entire wing to its mounting position.
+    fuselages : list of dict
+        Each dict: {"fuselage": MultiSegmentFuselage, "origin": (x, y, z)}.
     """
     name: str = "aircraft"
     surfaces: List[dict] = field(default_factory=list)
+    fuselages: List[dict] = field(default_factory=list)
 
     def add_surface(self, wing, origin=(0.0, 0.0, 0.0)):
+        """Add a lifting surface (backwards compatibility)."""
+        return self.add_wing(wing, origin)
+
+    def add_wing(self, wing, origin=(0.0, 0.0, 0.0)):
         """Add a lifting surface to the model.
 
         Parameters
@@ -44,18 +49,34 @@ class AircraftModel:
         wing : MultiSegmentWing
             The lifting surface definition.
         origin : tuple of float
-            (x, y, z) mounting position offset applied to the entire surface.
+            (x, y, z) mounting position offset applied to the surface.
 
         Returns
         -------
         self
-            For chaining.
         """
         self.surfaces.append({"wing": wing, "origin": origin})
         return self
 
+    def add_fuselage(self, fuselage, origin=(0.0, 0.0, 0.0)):
+        """Add a fuselage to the model.
+
+        Parameters
+        ----------
+        fuselage : MultiSegmentFuselage
+            The fuselage definition.
+        origin : tuple of float
+            (x, y, z) mounting position offset applied to the fuselage.
+
+        Returns
+        -------
+        self
+        """
+        self.fuselages.append({"fuselage": fuselage, "origin": origin})
+        return self
+
     def to_occ_shape(self, fuse=False):
-        """Build an OCC shape from all surfaces.
+        """Build an OCC shape from all aircraft components.
 
         Parameters
         ----------
@@ -66,25 +87,35 @@ class AircraftModel:
         Returns
         -------
         TopoDS_Shape
-            Compound or fused shape.
         """
         from OCP.gp import gp_Vec, gp_Trsf
         from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
         from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
 
         shapes = []
+        
+        # Process Wings
         for entry in self.surfaces:
             wing = entry["wing"]
             ox, oy, oz = entry["origin"]
-
             shape = wing.to_occ_shape()
 
-            # Apply origin translation if non-zero
             if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
                 trsf = gp_Trsf()
                 trsf.SetTranslation(gp_Vec(ox, oy, oz))
                 shape = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+            shapes.append(shape)
 
+        # Process Fuselages
+        for entry in self.fuselages:
+            fuselage = entry["fuselage"]
+            ox, oy, oz = entry["origin"]
+            shape = fuselage.to_occ_shape()
+
+            if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
+                trsf = gp_Trsf()
+                trsf.SetTranslation(gp_Vec(ox, oy, oz))
+                shape = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
             shapes.append(shape)
 
         if fuse:
@@ -95,23 +126,16 @@ class AircraftModel:
     def to_vertex_grids_list(self, num_points_profile=50,
                              spanwise_clustering=None,
                              chordwise_clustering=None):
-        """Get vertex grids for each surface separately.
-
-        Parameters
-        ----------
-        num_points_profile : int
-            Chordwise resolution.
-        spanwise_clustering : callable or None
-            Spanwise distribution law.
-        chordwise_clustering : callable or None
-            Chordwise distribution law.
+        """Get vertex grids for each surface and fuselage separately.
 
         Returns
         -------
         list of tuple
-            Each element is (X, Y, Z, name) for one surface.
+            Each element is (X, Y, Z, name) for one component.
         """
         result = []
+        
+        # Process Wings
         for entry in self.surfaces:
             wing = entry["wing"]
             ox, oy, oz = entry["origin"]
@@ -122,31 +146,30 @@ class AircraftModel:
             Y = Y + oy
             Z = Z + oz
             result.append((X, Y, Z, wing.name))
+
+        # Process Fuselages
+        for entry in self.fuselages:
+            fuse = entry["fuselage"]
+            ox, oy, oz = entry["origin"]
+            # For fuselages, spanwise roughly translates to lengthwise
+            X, Y, Z = fuse.to_vertex_grids(num_points_profile,
+                                             spanwise_clustering,
+                                             chordwise_clustering)
+            X = X + ox
+            Y = Y + oy
+            Z = Z + oz
+            result.append((X, Y, Z, fuse.name))
+            
         return result
 
     def to_triangles(self, num_points_profile=50, closed=True,
                      spanwise_clustering=None, chordwise_clustering=None):
-        """Get combined triangle list from all surfaces.
-
-        Parameters
-        ----------
-        num_points_profile : int
-            Chordwise resolution.
-        closed : bool
-            If True, add end-cap triangles for watertight meshes.
-        spanwise_clustering : callable or None
-            Spanwise distribution law.
-        chordwise_clustering : callable or None
-            Chordwise distribution law.
-
-        Returns
-        -------
-        triangles : list of tuple
-            Combined triangle list from all surfaces.
-        """
+        """Get combined triangle list from all components."""
         from aeroshape.analysis.mesh import MeshTopologyManager
 
         all_triangles = []
+        
+        # Process Wings
         for entry in self.surfaces:
             wing = entry["wing"]
             ox, oy, oz = entry["origin"]
@@ -158,34 +181,27 @@ class AircraftModel:
             Z = Z + oz
             tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=closed)
             all_triangles.extend(tris)
+
+        # Process Fuselages
+        for entry in self.fuselages:
+            fuse = entry["fuselage"]
+            ox, oy, oz = entry["origin"]
+            X, Y, Z = fuse.to_vertex_grids(num_points_profile,
+                                             spanwise_clustering,
+                                             chordwise_clustering)
+            X = X + ox
+            Y = Y + oy
+            Z = Z + oz
+            tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=closed)
+            all_triangles.extend(tris)
+            
         return all_triangles
 
     def compute_properties(self, method="gvm", density=1.0,
                            num_points_profile=50,
                            spanwise_clustering=None,
                            chordwise_clustering=None):
-        """Compute volume, mass, CG, and inertia for the full aircraft.
-
-        Parameters
-        ----------
-        method : str
-            ``'gvm'`` — GVM Divergence-Theorem on triangulated mesh.
-            ``'sai'`` — Section-Area Integration (shoelace + trapezoidal).
-            ``'occ'`` — OCC BRepGProp on the exact NURBS surface.
-        density : float
-            Material density in kg/m^3.
-        num_points_profile : int
-            Chordwise resolution (GVM/SAI only).
-        spanwise_clustering : callable or None
-            Spanwise distribution law (GVM/SAI only).
-        chordwise_clustering : callable or None
-            Chordwise distribution law (GVM/SAI only).
-
-        Returns
-        -------
-        dict
-            Keys: ``volume``, ``mass``, ``cg`` (3-array), ``inertia`` (6-tuple).
-        """
+        """Compute volume, mass, CG, and inertia for the full aircraft."""
         method = method.lower()
         if method == "occ":
             from aeroshape.nurbs.utils import occ_mass_properties
