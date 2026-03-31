@@ -17,6 +17,14 @@ import math
 from aeroshape.geometry.cross_sections import CrossSectionProfile
 
 
+def ellipsoid_blend(t):
+    """Produces a perfectly rounded 1/4 ellipsoid lobe from t=0 to t=1."""
+    return math.sqrt(1.0 - (1.0 - t)**2)
+
+def inverse_paraboloid_blend(t):
+    """Produces an upswept closing paraboloid boundary from t=0 (full) to t=1 (point)."""
+    return 1.0 - math.sqrt(1.0 - t)
+
 def _smooth_offset(t):
     """Cosine smooth ease-in/ease-out for offset transitions to guarantee tangent continuity."""
     return (1.0 - math.cos(t * math.pi)) / 2.0

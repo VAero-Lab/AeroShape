@@ -111,7 +111,7 @@ def show_interactive(
     Parameters
     ----------
     triangles : list of tuple
-        Triangulated surface from MeshTopologyManager.
+        Tessellated exterior boundaries originating natively from CAD.
     volume, mass : float
         Computed volume and mass.
     center_of_mass : tuple of float
@@ -230,7 +230,7 @@ def show_static(
     Parameters
     ----------
     triangles : list of tuple
-        Triangulated surface from MeshTopologyManager.
+        Tessellated exterior boundaries originating natively from CAD.
     volume, mass : float
         Computed volume and mass.
     center_of_mass : tuple of float

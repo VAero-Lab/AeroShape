@@ -88,7 +88,7 @@ class AircraftModel:
         -------
         TopoDS_Shape
         """
-        from OCP.gp import gp_Vec, gp_Trsf
+        from OCP.gp import gp_Vec, gp_Trsf, gp_Ax2, gp_Pnt, gp_Dir
         from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
         from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
 
@@ -103,8 +103,23 @@ class AircraftModel:
             if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
                 trsf = gp_Trsf()
                 trsf.SetTranslation(gp_Vec(ox, oy, oz))
-                shape = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
-            shapes.append(shape)
+                shape_trans = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+                shapes.append(shape_trans)
+            else:
+                shapes.append(shape)
+                
+            if wing.symmetric:
+                # Mirror across the local XZ plane (Y=0), then apply offset
+                mirror_trsf = gp_Trsf()
+                mirror_trsf.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0)))
+                mirrored = BRepBuilderAPI_Transform(shape, mirror_trsf, True).Shape()
+                
+                if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
+                    trsf2 = gp_Trsf()
+                    # Apply translation mirroring the Y offset naturally
+                    trsf2.SetTranslation(gp_Vec(ox, -oy, oz))
+                    mirrored = BRepBuilderAPI_Transform(mirrored, trsf2, True).Shape()
+                shapes.append(mirrored)
 
         # Process Fuselages
         for entry in self.fuselages:
@@ -131,7 +146,7 @@ class AircraftModel:
         Returns
         -------
         list of tuple
-            Each element is (X, Y, Z, name) for one component.
+            Each element is (X, Y, Z, name, is_mirrored) for one component.
         """
         result = []
         
@@ -142,57 +157,42 @@ class AircraftModel:
             X, Y, Z = wing.to_vertex_grids(num_points_profile,
                                              spanwise_clustering,
                                              chordwise_clustering)
-            X = X + ox
-            Y = Y + oy
-            Z = Z + oz
-            result.append((X, Y, Z, wing.name))
+            result.append((X + ox, Y + oy, Z + oz, wing.name, False))
+            
+            if wing.symmetric:
+                result.append((X + ox, -Y - oy, Z + oz, wing.name + "_mirrored", True))
 
         # Process Fuselages
         for entry in self.fuselages:
-            fuse = entry["fuselage"]
+            fuselage = entry["fuselage"]
             ox, oy, oz = entry["origin"]
             # For fuselages, spanwise roughly translates to lengthwise
-            X, Y, Z = fuse.to_vertex_grids(num_points_profile,
+            X, Y, Z = fuselage.to_vertex_grids(num_points_profile,
                                              spanwise_clustering,
                                              chordwise_clustering)
-            X = X + ox
-            Y = Y + oy
-            Z = Z + oz
-            result.append((X, Y, Z, fuse.name))
+            result.append((X + ox, Y + oy, Z + oz, fuselage.name, False))
             
         return result
 
-    def to_triangles(self, num_points_profile=50, closed=True,
+    def to_triangles(self, num_points_profile=80, closed=True,
                      spanwise_clustering=None, chordwise_clustering=None):
-        """Get combined triangle list from all components."""
+        """Get combined triangle list from all components natively inheriting symmetry."""
         from aeroshape.analysis.mesh import MeshTopologyManager
 
         all_triangles = []
         
-        # Process Wings
-        for entry in self.surfaces:
-            wing = entry["wing"]
-            ox, oy, oz = entry["origin"]
-            X, Y, Z = wing.to_vertex_grids(num_points_profile,
-                                             spanwise_clustering,
-                                             chordwise_clustering)
-            X = X + ox
-            Y = Y + oy
-            Z = Z + oz
+        # We explicitly inherit all physically modeled components (with mirrored boundaries) over numpy matrices identically and convert to closed meshes
+        grids = self.to_vertex_grids_list(
+            num_points_profile=num_points_profile,
+            spanwise_clustering=spanwise_clustering,
+            chordwise_clustering=chordwise_clustering
+        )
+        
+        for (X, Y, Z, name, is_mirrored) in grids:
             tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=closed)
-            all_triangles.extend(tris)
-
-        # Process Fuselages
-        for entry in self.fuselages:
-            fuse = entry["fuselage"]
-            ox, oy, oz = entry["origin"]
-            X, Y, Z = fuse.to_vertex_grids(num_points_profile,
-                                             spanwise_clustering,
-                                             chordwise_clustering)
-            X = X + ox
-            Y = Y + oy
-            Z = Z + oz
-            tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=closed)
+            if is_mirrored:
+                # Reverse winding to keep outward normals on the mirrored solid
+                tris = [(A, C, B) for (A, B, C) in tris]
             all_triangles.extend(tris)
             
         return all_triangles
@@ -219,38 +219,43 @@ class AircraftModel:
 
         from aeroshape.analysis.volume import VolumeCalculator
         from aeroshape.analysis.mass import MassPropertiesCalculator
+        from aeroshape.analysis.mesh import MeshTopologyManager
 
-        grids = self.to_vertex_grids_list(num_points_profile,
-                                           spanwise_clustering,
-                                           chordwise_clustering)
+        grids = self.to_vertex_grids_list(
+            num_points_profile=num_points_profile,
+            spanwise_clustering=spanwise_clustering,
+            chordwise_clustering=chordwise_clustering
+        )
 
-        if method == "sai":
-            volume = sum(
-                VolumeCalculator.compute_solid_volume_sai(X, Y, Z)
-                for X, Y, Z, _ in grids
-            )
-        else:
-            # GVM Divergence-Theorem on NURBS-sampled geometry
-            from aeroshape.analysis.mesh import MeshTopologyManager
+        total_vol = 0.0
+        sum_m_r = np.zeros(3)
+        sum_I = np.zeros(6) # Ixx, Iyy, Izz, Ixy, Ixz, Iyz
 
-            all_triangles = []
-            for X, Y, Z, _ in grids:
-                tris = MeshTopologyManager.get_wing_triangles(
-                    X, Y, Z, closed=True)
-                all_triangles.extend(tris)
+        for X, Y, Z, name, is_mirrored in grids:
+            # 1. Compute triangles for this specific grid
+            tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=True)
+            if is_mirrored:
+                tris = [(A, C, B) for (A, B, C) in tris]
+            
+            # 2. Volume via GVM
+            v_comp = VolumeCalculator.compute_solid_volume(tris)
+            m_comp = v_comp * density
+            
+            # 3. Mass properties for this component (at global origin)
+            # compute_all returns (CG, Inertia_at_origin, distribution)
+            cg_comp, i_comp, _ = MassPropertiesCalculator.compute_all(X, Y, Z, m_comp)
+            
+            total_vol += v_comp
+            sum_m_r += np.array(cg_comp) * m_comp
+            sum_I += np.array(i_comp)
 
-            volume = VolumeCalculator.compute_solid_volume(all_triangles)
+        total_mass = total_vol * density
+        final_cg = sum_m_r / total_mass if total_mass > 1e-9 else np.zeros(3)
+        final_i = tuple(sum_I)
 
-        all_X = np.vstack([g[0] for g in grids])
-        all_Y = np.vstack([g[1] for g in grids])
-        all_Z = np.vstack([g[2] for g in grids])
-
-        mass = volume * density
-        cg, inertia, _ = MassPropertiesCalculator.compute_all(
-            all_X, all_Y, all_Z, mass)
         return {
-            "volume": volume,
-            "mass": mass,
-            "cg": cg,
-            "inertia": inertia,
+            "volume": total_vol,
+            "mass": total_mass,
+            "cg": final_cg,
+            "inertia": final_i,
         }

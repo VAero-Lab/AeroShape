@@ -5,6 +5,16 @@ import numpy as np
 
 # ── Wire / curve construction utilities ─────────────────────────
 
+def bezier_quadratic(t, p0, p1, p2):
+    """Evaluate a quadratic Bezier curve at parameter t [0, 1]."""
+    u = 1.0 - t
+    return (
+        u**2 * p0[0] + 2*u*t * p1[0] + t**2 * p2[0],
+        u**2 * p0[1] + 2*u*t * p1[1] + t**2 * p2[1],
+        u**2 * p0[2] + 2*u*t * p1[2] + t**2 * p2[2]
+    )
+
+
 def make_wire_from_points(points_3d):
     """Create a B-spline wire from a list of 3D points.
 

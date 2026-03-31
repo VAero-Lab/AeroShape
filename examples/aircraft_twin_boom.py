@@ -47,14 +47,14 @@ def create_tail_boom(name: str) -> MultiSegmentFuselage:
     return boom
 
 def create_wings() -> list:
-    airfoil = AirfoilProfile.from_naca4("2412", num_points=50)
-    tail_airfoil = AirfoilProfile.from_naca4("0010", num_points=50)
+    airfoil = AirfoilProfile.from_naca4("6412", num_points=50)
+    tail_airfoil = AirfoilProfile.from_naca4("0012", num_points=50)
 
     # 1. Central Inner Wing (connects pod to booms)
-    # Spans 4.2 from the pod to embed safely inside the booms stationed at y=4.0
-    inner_wing = MultiSegmentWing(name="Inner Wing", symmetric=True)
+    # Spans 8 from the pod to embed safely inside the booms stationed at y=4.0
+    inner_wing = MultiSegmentWing(name="Main Wing", symmetric=True)
     inner_wing.add_segment(SegmentSpec(
-        span=4.2, root_airfoil=airfoil, root_chord=3.0, tip_chord=3.0, sweep_le_deg=0.0
+        span=12, root_airfoil=airfoil, root_chord=3.0, tip_chord=2.75, sweep_le_deg=0.0
     ))
 
     # 2. Horizontal Stabilizer (bridges the two tail booms deeply)
@@ -77,10 +77,10 @@ def main():
 
     # 2. The Tail Booms (Placed exactly at the tip of the inner wings: y = +/- 4.0)
     boom_right = create_tail_boom("Right Boom")
-    ac.add_fuselage(boom_right, origin=(6.0, 4.0, 0.5))
+    ac.add_fuselage(boom_right, origin=(6.4, 4.0, 0.5))
     
     boom_left = create_tail_boom("Left Boom")
-    ac.add_fuselage(boom_left, origin=(6.0, -4.0, 0.5))
+    ac.add_fuselage(boom_left, origin=(6.4, -4.0, 0.5))
 
     # 3. All Wing Segments
     for w, p in create_wings():
@@ -97,7 +97,7 @@ def main():
     print(f"Exported Assembly to {export_path}")
 
     if "--no-show" not in sys.argv:
-        show_interactive(ac.to_triangles(), props['volume'], props['mass'], props['cg'], props['inertia'], title="Twin Boom Aircraft")
+        show_interactive(ac.to_triangles(num_points_profile=80), props['volume'], props['mass'], props['cg'], props['inertia'], title="Twin Boom Aircraft")
 
 if __name__ == "__main__":
     main()

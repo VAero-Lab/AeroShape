@@ -76,15 +76,6 @@ class CrossSectionProfile:
         wire = BRepBuilderAPI_MakeWire(edge).Wire()
         return wire
 
-    @classmethod
-    def from_points(cls, y, z, name="custom"):
-        """Create from explicit coordinate arrays."""
-        return cls(
-            y=np.asarray(y, dtype=float),
-            z=np.asarray(z, dtype=float),
-            name=name,
-        )
-
 
 class CircularProfile(CrossSectionProfile):
     """A circular fuselage cross-section."""

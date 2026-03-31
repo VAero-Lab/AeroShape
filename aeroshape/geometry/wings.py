@@ -257,7 +257,7 @@ class MultiSegmentWing:
 
     @classmethod
     def from_planform_curves(cls, le_points, te_points, airfoil_stations,
-                             num_sections=30, name="wing"):
+                             num_sections=30, name="wing", symmetric=True):
         """Build a wing from leading- and trailing-edge guide curves.
 
         Instead of defining segments, the user specifies the leading-edge
@@ -286,6 +286,8 @@ class MultiSegmentWing:
             Number of spanwise sections to create (more -> smoother).
         name : str
             Wing name.
+        symmetric : bool
+            If True, only starboard half is provided and will be mirrored.
 
         Returns
         -------
@@ -328,9 +330,129 @@ class MultiSegmentWing:
                 "airfoil": airfoil,
             })
 
-        wing = cls(name=name)
+        wing = cls(name=name, symmetric=symmetric)
         wing._precomputed_frames = frames
         return wing
+
+    @classmethod
+    def create_blended_winglet(cls, base_wing: "MultiSegmentWing", 
+                               height_z: float, 
+                               sweep_out_y: float = 0.5,
+                               tip_chord_ratio: float = 0.5,
+                               num_sections: int = 25,
+                               name: str = "Blended Winglet"):
+        """Create a G1 continuous winglet attaching precisely to the tip of an existing wing.
+        
+        Evaluates the terminal sweep and dihedral frame of the main wing and projects 
+        a mathematically continuous quadratic Bezier loft upwards.
+        """
+        # Resolve the terminal boundary condition of the host wing
+        frames = base_wing.get_section_frames()
+        last = frames[-1]
+        host_seg = base_wing.segments[-1] # The segment driving the outbound tangency
+        
+        le0 = (last["x_offset"], last["y"], last["z_offset"])
+        chord0 = last["chord"]
+        te0 = (le0[0] + chord0, le0[1], le0[2])
+        
+        # Terminal tangent extension dynamically bridging outward iteratively from host bounds
+        d_out = sweep_out_y
+        p1_le = (le0[0] + d_out * math.tan(math.radians(host_seg.sweep_le_deg)), 
+                 le0[1] + d_out, 
+                 le0[2] + d_out * math.tan(math.radians(host_seg.dihedral_deg)))
+                 
+        p1_te = (te0[0] + d_out * math.tan(math.radians(host_seg.sweep_le_deg)), 
+                 te0[1] + d_out, 
+                 te0[2] + d_out * math.tan(math.radians(host_seg.dihedral_deg)))
+
+        # Winglet ascends directly along Z axis collinear to the tangent bridge point
+        p2_le = (p1_le[0] + 0.5, p1_le[1], p1_le[2] + height_z)
+        p2_te = (p1_te[0] + 0.5 - chord0*(1.0-tip_chord_ratio), p1_te[1], p1_te[2] + height_z)
+        
+        from aeroshape.nurbs.utils import bezier_quadratic
+        le_pts, te_pts = [], []
+        for i in range(num_sections):
+            t = i / float(num_sections - 1)
+            le_pts.append(bezier_quadratic(t, le0, p1_le, p2_le))
+            te_pts.append(bezier_quadratic(t, te0, p1_te, p2_te))
+
+        winglet = cls.from_planform_curves(
+            le_points=le_pts, te_points=te_pts,
+            airfoil_stations=[(0.0, last["airfoil"]), (1.0, last["airfoil"])],
+            num_sections=num_sections, name=name
+        )
+        winglet.symmetric = base_wing.symmetric
+        return winglet
+
+    @classmethod
+    def create_box_fin(cls, lower_wing: "MultiSegmentWing", upper_wing: "MultiSegmentWing", 
+                       lower_origin: tuple = (0.0, 0.0, 0.0),
+                       upper_origin: tuple = (0.0, 0.0, 0.0),
+                       d_out: float = 3.0,
+                       num_sections: int = 40,
+                       name: str = "Box Wing Fin"):
+        """Create a continuous flat-walled bounding box pillar securely marrying two wing topology boundaries.
+        
+        Extrapolates tangent vectors from both bounding conditions to lock analytic G1 evaluation, bypassing B-Spline ringing.
+        Utilizes absolute bounding frames via lower_origin and upper_origin to correctly anchor the parametric loop.
+        """
+        lower_last = lower_wing.get_section_frames()[-1]
+        upper_last = upper_wing.get_section_frames()[-1]
+        
+        le0 = (lower_last["x_offset"] + lower_origin[0], 
+               lower_last["y"] + lower_origin[1], 
+               lower_last["z_offset"] + lower_origin[2])
+        te0 = (le0[0] + lower_last["chord"], le0[1], le0[2])
+        
+        le5 = (upper_last["x_offset"] + upper_origin[0], 
+               upper_last["y"] + upper_origin[1], 
+               upper_last["z_offset"] + upper_origin[2])
+        te5 = (le5[0] + upper_last["chord"], le5[1], le5[2])
+        
+        flat_y = le0[1] + d_out
+        
+        lower_seg = lower_wing.segments[-1]
+        p1_le = (le0[0] + d_out * math.tan(math.radians(lower_seg.sweep_le_deg)), flat_y, le0[2] + d_out * math.tan(math.radians(lower_seg.dihedral_deg)))
+        p1_te = (te0[0] + d_out * math.tan(math.radians(lower_seg.sweep_le_deg)), flat_y, te0[2] + d_out * math.tan(math.radians(lower_seg.dihedral_deg)))
+        
+        upper_seg = upper_wing.segments[-1]
+        # Invert the upper span bounds computationally to flow inbound effectively.
+        p4_le = (le5[0] + d_out * math.tan(math.radians(-upper_seg.sweep_le_deg)), flat_y, le5[2] + d_out * math.tan(math.radians(-upper_seg.dihedral_deg)))
+        p4_te = (te5[0] + d_out * math.tan(math.radians(-upper_seg.sweep_le_deg)), flat_y, te5[2] + d_out * math.tan(math.radians(-upper_seg.dihedral_deg)))
+        
+        p2_le = (p1_le[0] + 0.3*(p4_le[0]-p1_le[0]), flat_y, p1_le[2] + 0.3*(p4_le[2]-p1_le[2]))
+        p3_le = (p1_le[0] + 0.7*(p4_le[0]-p1_le[0]), flat_y, p1_le[2] + 0.7*(p4_le[2]-p1_le[2]))
+        
+        p2_te = (p1_te[0] + 0.3*(p4_te[0]-p1_te[0]), flat_y, p1_te[2] + 0.3*(p4_te[2]-p1_te[2]))
+        p3_te = (p1_te[0] + 0.7*(p4_te[0]-p1_te[0]), flat_y, p1_te[2] + 0.7*(p4_te[2]-p1_te[2]))
+        
+        from aeroshape.nurbs.utils import bezier_quadratic
+        le_pts, te_pts = [], []
+        num_c = max(5, int(num_sections * 0.4))
+        num_s = max(5, int(num_sections * 0.2))
+        
+        for i in range(num_c):
+            t = i / float(num_c)
+            le_pts.append(bezier_quadratic(t, le0, p1_le, p2_le))
+            te_pts.append(bezier_quadratic(t, te0, p1_te, p2_te))
+            
+        for i in range(num_s):
+            t = i / float(num_s)
+            le_pts.append((p2_le[0] + t*(p3_le[0]-p2_le[0]), flat_y, p2_le[2] + t*(p3_le[2]-p2_le[2])))
+            te_pts.append((p2_te[0] + t*(p3_te[0]-p2_te[0]), flat_y, p2_te[2] + t*(p3_te[2]-p2_te[2])))
+            
+        for i in range(num_c):
+            t = i / float(num_c - 1)
+            le_pts.append(bezier_quadratic(t, p3_le, p4_le, le5))
+            te_pts.append(bezier_quadratic(t, p3_te, p4_te, te5))
+            
+        fin = cls.from_planform_curves(
+            le_points=le_pts, te_points=te_pts,
+            airfoil_stations=[(0.0, lower_last["airfoil"]), (1.0, upper_last["airfoil"])],
+            num_sections=num_sections, name=name
+        )
+        fin.symmetric = lower_wing.symmetric
+        return fin
 
     # ── Triangle mesh ─────────────────────────────────────────────
 

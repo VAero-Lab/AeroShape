@@ -15,16 +15,16 @@ Key benefits over the segment-based approach:
 """
 
 import os
-
-from aeroshape import (
-    AirfoilProfile,
-    MultiSegmentWing,
-    VolumeCalculator,
-    MassPropertiesCalculator,
-    NurbsExporter,
-    show_interactive,
-)
-from aeroshape import MeshTopologyManager
+import sys
+import numpy as np
+from aeroshape import AircraftModel, show_interactive
+from aeroshape.geometry.fuselage import FuselageSegment, MultiSegmentFuselage, ellipsoid_blend
+from aeroshape.geometry.cross_sections import EllipticalProfile
+from aeroshape.geometry.wings import MultiSegmentWing, SegmentSpec, AirfoilProfile
+from aeroshape.analysis.mesh import MeshTopologyManager
+from aeroshape.analysis.volume import VolumeCalculator
+from aeroshape.analysis.mass import MassPropertiesCalculator
+from aeroshape.nurbs.export import NurbsExporter
 
 EXPORT_DIR = "Exports"
 
@@ -81,21 +81,22 @@ def main():
         le_points=le_points,
         te_points=te_points,
         airfoil_stations=airfoil_stations,
-        num_sections=40,        # dense sections for smooth loft
-        name="BWB (Guide Curves)",
+        num_sections=80,        # dense sections for smooth loft
+        name="BWB (Guide Curves)"
     )
 
-    # ── GVM Analysis ─────────────────────────────────────────────
-    num_pts = 60
-    X, Y, Z = bwb.to_vertex_grids(num_points_profile=num_pts)
-    triangles = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=True)
-    volume = VolumeCalculator.compute_solid_volume(triangles)
+    # ── Aircraft Assembly & Analysis ─────────────────────────────
+    # By using AircraftModel, symmetry is handled automatically
+    model = AircraftModel(name="BWB Guided")
+    model.add_wing(bwb)
 
-    density = 150.0   # composite structure [kg/m^3]
-    mass = volume * density
-    cg, inertia, _ = MassPropertiesCalculator.compute_all(X, Y, Z, mass)
+    props = model.compute_properties(method='gvm', density=150.0, num_points_profile=80)
+    volume = props['volume']
+    mass = props['mass']
+    cg = props['cg']
+    inertia = props['inertia']
 
-    print(f"Configuration: {bwb.name}")
+    print(f"Configuration: {model.name}")
     print(f"  Sections: {len(bwb.get_section_frames())}")
     print(f"  Volume: {volume:.4f} m^3")
     print(f"  Mass:   {mass:.1f} kg")
@@ -103,21 +104,19 @@ def main():
     print(f"  Ixx={inertia[0]:.1f}, Iyy={inertia[1]:.1f}, "
           f"Izz={inertia[2]:.1f} kg*m^2")
 
-    # ── Compare with segment-based BWB ───────────────────────────
-    print("\n  Note: guide-curve construction produces a smoother planform")
-    print("  than the segment-based approach (no LE/TE kinks at segment")
-    print("  boundaries).")
-
     # ── NURBS export ─────────────────────────────────────────────
     os.makedirs(EXPORT_DIR, exist_ok=True)
-    shape = bwb.to_occ_shape()
+    shape = model.to_occ_shape()
     step_path = os.path.join(EXPORT_DIR, "blended_wing_body_guided.step")
     NurbsExporter.to_step(shape, step_path)
     print(f"\n  STEP exported: {step_path}")
 
     # ── Visualize ────────────────────────────────────────────────
-    show_interactive(triangles, volume, mass, cg, inertia,
-                     title=bwb.name)
+    if "--no-show" not in sys.argv:
+        # Use high resolution for smooth visual appearance
+        tris = model.to_triangles(num_points_profile=100)
+        show_interactive(tris, volume, mass, cg, inertia,
+                         title=model.name)
 
 
 if __name__ == "__main__":

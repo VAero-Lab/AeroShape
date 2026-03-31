@@ -86,7 +86,7 @@ def main():
     print(f"Exported STEP model to {export_path}")
 
     if "--no-show" not in sys.argv:
-        show_interactive(ac.to_triangles(), props['volume'], props['mass'], props['cg'], props['inertia'], title="Experimental Glider")
+        show_interactive(ac.to_triangles(num_points_profile=80), props['volume'], props['mass'], props['cg'], props['inertia'], title="Experimental Glider")
 
 if __name__ == "__main__":
     main()
