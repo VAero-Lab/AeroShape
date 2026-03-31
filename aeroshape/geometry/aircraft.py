@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import List
 
 import numpy as np
+import math
 
 
 @dataclass
@@ -99,26 +100,29 @@ class AircraftModel:
             wing = entry["wing"]
             ox, oy, oz = entry["origin"]
             shape = wing.to_occ_shape()
+            # build123d objects need to be unwrapped for OCP calls
+            occ_shape = shape.wrapped if hasattr(shape, "wrapped") else shape
 
             if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
                 trsf = gp_Trsf()
                 trsf.SetTranslation(gp_Vec(ox, oy, oz))
-                shape_trans = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
+                # copy=False to share geometry (faster assembly and smaller export)
+                shape_trans = BRepBuilderAPI_Transform(occ_shape, trsf, False).Shape()
                 shapes.append(shape_trans)
             else:
-                shapes.append(shape)
+                shapes.append(occ_shape)
                 
             if wing.symmetric:
                 # Mirror across the local XZ plane (Y=0), then apply offset
                 mirror_trsf = gp_Trsf()
                 mirror_trsf.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0)))
-                mirrored = BRepBuilderAPI_Transform(shape, mirror_trsf, True).Shape()
+                mirrored = BRepBuilderAPI_Transform(occ_shape, mirror_trsf, False).Shape()
                 
                 if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
                     trsf2 = gp_Trsf()
                     # Apply translation mirroring the Y offset naturally
                     trsf2.SetTranslation(gp_Vec(ox, -oy, oz))
-                    mirrored = BRepBuilderAPI_Transform(mirrored, trsf2, True).Shape()
+                    mirrored = BRepBuilderAPI_Transform(mirrored, trsf2, False).Shape()
                 shapes.append(mirrored)
 
         # Process Fuselages
@@ -126,12 +130,13 @@ class AircraftModel:
             fuselage = entry["fuselage"]
             ox, oy, oz = entry["origin"]
             shape = fuselage.to_occ_shape()
+            occ_shape = shape.wrapped if hasattr(shape, "wrapped") else shape
 
             if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
                 trsf = gp_Trsf()
                 trsf.SetTranslation(gp_Vec(ox, oy, oz))
-                shape = BRepBuilderAPI_Transform(shape, trsf, True).Shape()
-            shapes.append(shape)
+                occ_shape = BRepBuilderAPI_Transform(occ_shape, trsf, False).Shape()
+            shapes.append(occ_shape)
 
         if fuse:
             return NurbsSurfaceBuilder.fuse_shapes(shapes)
@@ -200,22 +205,41 @@ class AircraftModel:
     def compute_properties(self, method="gvm", density=1.0,
                            num_points_profile=50,
                            spanwise_clustering=None,
-                           chordwise_clustering=None):
-        """Compute volume, mass, CG, and inertia for the full aircraft."""
+                           chordwise_clustering=None,
+                           uproc=True,
+                           tolerance=1e-4):
+        """Compute volume, mass, CG, and inertia for the full aircraft.
+
+        Parameters
+        ----------
+        method : str
+            "gvm" (fast mesh-based) or "occ" (exact NURBS integration).
+        density : float
+            Material density in kg/m^3.
+        num_points_profile : int
+            Grid resolution (for GVM only).
+        uproc : bool
+            If True and method="occ", use multiprocessing for acceleration.
+        tolerance : float
+            Relative error tolerance for OCC integration.
+        """
         method = method.lower()
         if method == "occ":
-            from aeroshape.nurbs.utils import occ_mass_properties
-            shape = self.to_occ_shape(fuse=False)
-            props = occ_mass_properties(shape, density)
-            com = props["center_of_mass"]
-            imat = props["inertia_matrix"]
-            return {
-                "volume": props["volume"],
-                "mass": props["mass"],
-                "cg": np.array(com),
-                "inertia": (imat[0, 0], imat[1, 1], imat[2, 2],
-                            imat[0, 1], imat[0, 2], imat[1, 2]),
-            }
+            if uproc:
+                return self._compute_properties_occ_parallel(density, tolerance)
+            else:
+                from aeroshape.nurbs.utils import occ_mass_properties
+                shape = self.to_occ_shape(fuse=False)
+                props = occ_mass_properties(shape, density, tolerance=tolerance)
+                com = props["center_of_mass"]
+                imat = props["inertia_matrix"]
+                return {
+                    "volume": props["volume"],
+                    "mass": props["mass"],
+                    "cg": np.array(com),
+                    "inertia": (imat[0, 0], imat[1, 1], imat[2, 2],
+                                imat[0, 1], imat[0, 2], imat[1, 2]),
+                }
 
         from aeroshape.analysis.volume import VolumeCalculator
         from aeroshape.analysis.mass import MassPropertiesCalculator
@@ -259,3 +283,128 @@ class AircraftModel:
             "cg": final_cg,
             "inertia": final_i,
         }
+
+    def _compute_properties_occ_parallel(self, density, tolerance):
+        """Compute OCC properties by distributing individual segments to a process pool."""
+        import multiprocessing as mp
+        import numpy as np
+
+        tasks = []
+        # Each task: (component_type, definition, segment_index, origin, is_mirrored, symmetric_wing)
+        
+        # Wings
+        for entry in self.surfaces:
+            wing = entry['wing']
+            origin = entry['origin']
+            n_total = len(wing.get_section_frames())
+            # Match chunking logic in to_occ_segments (max_sections=15)
+            if n_total < 2:
+                num_tasks = 0
+            else:
+                num_tasks = math.ceil((n_total - 1) / (15 - 1))
+                
+            # Add starboard segments
+            for i in range(num_tasks):
+                tasks.append(('wing_seg', wing, i, origin, False))
+            # Add port segments if symmetric
+            if wing.symmetric:
+                for i in range(num_tasks):
+                    tasks.append(('wing_seg', wing, i, origin, True))
+
+        # Fuselages
+        for entry in self.fuselages:
+            fuse = entry['fuselage']
+            origin = entry['origin']
+            n_total = len(fuse.get_section_frames())
+            if n_total < 2:
+                num_tasks = 0
+            else:
+                num_tasks = math.ceil((n_total - 1) / (15 - 1))
+                
+            for i in range(num_tasks):
+                tasks.append(('fuse_seg', fuse, i, origin, False))
+
+        if not tasks:
+            return {"volume": 0.0, "mass": 0.0, "cg": np.zeros(3), "inertia": (0,0,0,0,0,0)}
+
+        # Use Pool to compute segment properties
+        with mp.Pool(processes=min(len(tasks), mp.cpu_count())) as pool:
+            results = pool.starmap(_worker_compute_segment_props, [(t, density, tolerance) for t in tasks])
+
+        # Aggregate results
+        total_vol = 0.0
+        total_mass = 0.0
+        sum_m_r = np.zeros(3)
+        sum_I = np.zeros((3, 3))
+
+        for res in results:
+            total_vol += res['volume']
+            total_mass += res['mass']
+            sum_m_r += np.array(res['center_of_mass']) * res['mass']
+            sum_I += res['inertia_matrix']
+
+        final_cg = sum_m_r / total_mass if total_mass > 1e-9 else np.zeros(3)
+        
+        return {
+            "volume": total_vol,
+            "mass": total_mass,
+            "cg": final_cg,
+            "inertia": (sum_I[0, 0], sum_I[1, 1], sum_I[2, 2],
+                        sum_I[0, 1], sum_I[0, 2], sum_I[1, 2]),
+        }
+
+def _worker_compute_segment_props(task, density, tolerance):
+    """Worker function to build a single segment and compute its properties."""
+    import numpy as np
+    from OCP.gp import gp_Trsf, gp_Vec, gp_Ax2, gp_Pnt, gp_Dir
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.GProp import GProp_GProps
+    from OCP.BRepGProp import BRepGProp
+    
+    comp_type, definition, seg_idx, origin, is_mirrored = task
+    ox, oy, oz = origin
+    
+    # 1. Build segment shape
+    # We use to_occ_segments which we just implemented
+    segs = definition.to_occ_segments()
+    if seg_idx >= len(segs):
+         return {"volume": 0.0, "mass": 0.0, "center_of_mass": (0,0,0), "inertia_matrix": np.zeros((3,3))}
+         
+    shape = segs[seg_idx]
+    occ_shape = shape.wrapped if hasattr(shape, "wrapped") else shape
+
+    # 2. Transform to assembly position
+    trsf = gp_Trsf()
+    
+    if comp_type == 'wing_seg' and is_mirrored:
+        # Mirror across Y=0 (local)
+        mirror_trsf = gp_Trsf()
+        mirror_trsf.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0)))
+        occ_shape = BRepBuilderAPI_Transform(occ_shape, mirror_trsf, False).Shape()
+        # Apply mirrored translation
+        trsf.SetTranslation(gp_Vec(ox, -oy, oz))
+    else:
+        # Apply standard translation
+        trsf.SetTranslation(gp_Vec(ox, oy, oz))
+        
+    occ_final = BRepBuilderAPI_Transform(occ_shape, trsf, False).Shape()
+
+    # 3. Compute properties
+    props = GProp_GProps()
+    BRepGProp.VolumeProperties_s(occ_final, props, tolerance, False)
+    
+    volume = float(props.Mass())
+    cg = props.CentreOfMass()
+    mat = props.MatrixOfInertia()
+    
+    inertia = np.zeros((3, 3))
+    for i in range(3):
+        for j in range(3):
+            inertia[i, j] = mat.Value(i+1, j+1)
+
+    return {
+        "volume": abs(volume),
+        "mass": abs(volume) * density,
+        "center_of_mass": (cg.X(), cg.Y(), cg.Z()),
+        "inertia_matrix": inertia * density,
+    }

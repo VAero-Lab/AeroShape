@@ -98,7 +98,7 @@ def main():
     end = time.time()
     print(f"Time to create aircraft: {end - now:.2f} seconds")
     
-    props = ac.compute_properties(method="occ", density=2000.0) 
+    props = ac.compute_properties(method="occ", density=2000.0, uproc=True, tolerance=0.1) 
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
     end1 = time.time()

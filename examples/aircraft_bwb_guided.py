@@ -17,6 +17,7 @@ Key benefits over the segment-based approach:
 import os
 import sys
 import numpy as np
+import time
 from aeroshape import AircraftModel, show_interactive
 from aeroshape.geometry.fuselage import FuselageSegment, MultiSegmentFuselage, ellipsoid_blend
 from aeroshape.geometry.cross_sections import EllipticalProfile
@@ -30,6 +31,7 @@ EXPORT_DIR = "Exports"
 
 
 def main():
+    start_time = time.time()
     # ── Airfoil profiles at key spanwise stations ────────────────
     # Center body: very thick symmetric (cabin volume)
     center = AirfoilProfile.from_naca4("0025", num_points=60)
@@ -89,12 +91,17 @@ def main():
     # By using AircraftModel, symmetry is handled automatically
     model = AircraftModel(name="BWB Guided")
     model.add_wing(bwb)
-
-    props = model.compute_properties(method='gvm', density=150.0, num_points_profile=80)
+    end_time = time.time()
+    print(f"Time to create aircraft: {end_time - start_time:.2f} seconds")
+    
+    start_time1 = time.time()
+    props = model.compute_properties(method='occ', density=150.0, uproc=True, tolerance=0.1)
     volume = props['volume']
     mass = props['mass']
     cg = props['cg']
     inertia = props['inertia']
+    end_time1 = time.time()
+    print(f"Time to compute properties: {end_time1 - start_time1:.2f} seconds")
 
     print(f"Configuration: {model.name}")
     print(f"  Sections: {len(bwb.get_section_frames())}")
@@ -104,13 +111,17 @@ def main():
     print(f"  Ixx={inertia[0]:.1f}, Iyy={inertia[1]:.1f}, "
           f"Izz={inertia[2]:.1f} kg*m^2")
 
+    start_time2 = time.time()
     # ── NURBS export ─────────────────────────────────────────────
     os.makedirs(EXPORT_DIR, exist_ok=True)
+    # We can use the same model.to_occ_shape() for export
     shape = model.to_occ_shape()
     step_path = os.path.join(EXPORT_DIR, "blended_wing_body_guided.step")
     NurbsExporter.to_step(shape, step_path)
     print(f"\n  STEP exported: {step_path}")
-
+    end_time2 = time.time()
+    print(f"Time to export: {end_time2 - start_time2:.2f} seconds")
+    
     # ── Visualize ────────────────────────────────────────────────
     if "--no-show" not in sys.argv:
         # Use high resolution for smooth visual appearance

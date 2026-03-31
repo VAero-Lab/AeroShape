@@ -8,6 +8,8 @@ cross sections seamlessly feeding into a Circular exhaust boundary.
 import os
 import sys
 import math
+import time
+
 from aeroshape import AircraftModel, show_interactive
 from aeroshape.geometry.fuselage import FuselageSegment, MultiSegmentFuselage
 from aeroshape.geometry.cross_sections import EllipticalProfile, CircularProfile
@@ -63,24 +65,34 @@ def create_uav_wings() -> list:
     return [(main_wing, (1.65, 0, 0.2))] # Mounted effortlessly deep inside the centerbody
 
 def main():
+    start_time = time.time()
     ac = AircraftModel("UAV Demo")
     
     ac.add_fuselage(create_uav_body())
     
     for wing, pos in create_uav_wings():
         ac.add_wing(wing, origin=pos)
+    end_time = time.time()
+    print(f"Time to create aircraft: {end_time - start_time:.2f} seconds")
 
-    # Fast mass property extraction directly utilizing robust NURBS evaluations
-    props = ac.compute_properties(method='gvm', density=1500.0) # UAV avionics density
+    # Fast mass property extraction directly utilizing robust parallel NURBS evaluations
+    start_time1 = time.time()
+    props = ac.compute_properties(method='occ', density=1500.0, uproc=True, tolerance=0.1) # UAV avionics density
+    end_time1 = time.time()
+    print(f"Time to compute properties: {end_time1 - start_time1:.2f} seconds")
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
 
-    os.makedirs("Exports", exist_ok=True)
+    start_time2 = time.time()
+    # Native representation STEP export (optimized assembly-aware writer)
     from aeroshape.nurbs.export import NurbsExporter
+    os.makedirs("Exports", exist_ok=True)
     export_path = "Exports/aircraft_uav_bwb.step"
-    NurbsExporter.to_step(ac.to_occ_shape(fuse=False), export_path)
+    NurbsExporter.to_step(ac.to_occ_shape(), export_path)
     print(f"Exported Assembly to {export_path}")
-
+    end_time2 = time.time()
+    print(f"Time to export STEP: {end_time2 - start_time2:.2f} seconds")
+    
     if "--no-show" not in sys.argv:
         show_interactive(ac.to_triangles(), props['volume'], props['mass'], props['cg'], props['inertia'], title="UAV Assembly")
 

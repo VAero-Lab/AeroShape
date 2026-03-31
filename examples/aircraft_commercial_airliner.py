@@ -13,6 +13,7 @@ from aeroshape import AircraftModel, show_interactive
 from aeroshape.geometry.fuselage import FuselageSegment, MultiSegmentFuselage, ellipsoid_blend, inverse_paraboloid_blend
 from aeroshape.geometry.cross_sections import EllipticalProfile
 from aeroshape.geometry.wings import MultiSegmentWing, SegmentSpec, AirfoilProfile
+import time
 
 def create_fuselage() -> MultiSegmentFuselage:
     fuse = MultiSegmentFuselage(name="Airliner Fuselage")
@@ -88,6 +89,8 @@ def create_wings() -> list:
     return wings
 
 def main():
+
+    start_time = time.time()
     ac = AircraftModel("Commercial Airliner")
     
     # 1. Attach the core fuselage geometry
@@ -96,20 +99,28 @@ def main():
     # 2. Attach symmetric main wings and stabilizers
     for wing, pos in create_wings():
         ac.add_wing(wing, origin=pos)
+    end_time = time.time()
+    print(f"Time to create aircraft: {end_time - start_time:.2f} seconds")
 
-    # Compute high-fidelity volume metrics organically across all NURBS patches
-    props = ac.compute_properties(method='gvm', density=3000.0) # Density models payload/structure
+    start_time2 = time.time()
+    # Compute high-fidelity mass properties in parallel with non-adaptive integration
+    props = ac.compute_properties(method='occ', density=3000.0, uproc=True, tolerance=0.1)
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
+    end_time2 = time.time()
+    print(f"Time to compute properties: {end_time2 - start_time2:.2f} seconds")
 
-    # Native representation STEP export
+    start_time3 = time.time()
+    # Native representation STEP export (optimized assembly-aware writer)
     from aeroshape.nurbs.export import NurbsExporter
     os.makedirs("Exports", exist_ok=True)
-    export_path = "Exports/aircraft_commercial_airliner.stl"
-    NurbsExporter.to_stl(ac.to_occ_shape(fuse=False), export_path, linear_deflection=0.01)
-    print(f"Exported High-Fidelity CAD to {export_path}")
+    step_path = "Exports/aircraft_commercial_airliner.step"
+    NurbsExporter.to_step(ac.to_occ_shape(), step_path)
+    end_time3 = time.time()
+    print(f"Time to export STEP: {end_time3 - start_time3:.2f} seconds")
+    print(f"Exported High-Fidelity CAD (STEP) to {step_path}")
 
-    # Visualize 3D Mesh natively generated from Numpy structured surface loops resolving symmetrical clones flawlessly
+    # Visualize 3D Mesh natively generated from NURBS for smooth rendering
     if "--no-show" not in sys.argv:
         tris = ac.to_triangles(num_points_profile=80)
         show_interactive(tris, props['volume'], props['mass'], props['cg'], props['inertia'], title="Commercial Airliner")

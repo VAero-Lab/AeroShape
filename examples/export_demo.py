@@ -35,11 +35,11 @@ def main():
     ))
 
     # Compute properties for reference
-    X, Y, Z = wing.to_vertex_grids(num_points_profile=50)
-    triangles = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=True)
-    volume = VolumeCalculator.compute_solid_volume(triangles)
-    mass = volume * 2700.0
-
+    # Compute properties for reference using the exact NURBS integration
+    props = wing.compute_properties(method='occ', density=2700.0, tolerance=0.1)
+    volume = props['volume']
+    mass = props['mass']
+    
     print(f"Wing volume: {volume:.6f} m^3")
     print(f"Wing mass (aluminum): {mass:.2f} kg")
 

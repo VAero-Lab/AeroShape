@@ -136,7 +136,7 @@ def tessellate_shape(shape, linear_deflection=0.1, angular_deflection=0.5):
 
     Parameters
     ----------
-    shape : TopoDS_Shape
+    shape : TopoDS_Shape or build123d.Shape
         The OCC shape to tessellate.
     linear_deflection : float
         Maximum chord deviation in model units.
@@ -154,6 +154,10 @@ def tessellate_shape(shape, linear_deflection=0.1, angular_deflection=0.5):
     from OCP.TopoDS import TopoDS
     from OCP.BRep import BRep_Tool
     from OCP.TopLoc import TopLoc_Location
+
+    # Handle build123d objects
+    if hasattr(shape, "wrapped"):
+        shape = shape.wrapped
 
     mesh = BRepMesh_IncrementalMesh(shape, linear_deflection, False,
                                     angular_deflection, True)
@@ -231,6 +235,10 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
     from OCP.BRepGProp import BRepGProp
 
     axis = axis.upper()
+
+    # Handle build123d objects
+    if hasattr(shape, "wrapped"):
+        shape = shape.wrapped
 
     # --- Collect all faces and identify lateral (skin) faces ---
     faces_info = []
@@ -355,15 +363,18 @@ def sample_shape_grid(shape, n_spanwise, n_chordwise,
     return X, Y, Z
 
 
-def occ_mass_properties(shape, density=1.0):
+def occ_mass_properties(shape, density=1.0, tolerance=1e-6):
     """Compute volume and mass properties using OCC's exact NURBS integration.
 
     Parameters
     ----------
-    shape : TopoDS_Shape
+    shape : TopoDS_Shape or build123d.Shape
         A solid OCC shape.
     density : float
         Material density in kg/m^3.
+    tolerance : float
+        Maximal relative error of computed mass (volume) for each face.
+        Values > 0.001 trigger non-adaptive (faster but less accurate) integration.
 
     Returns
     -------
@@ -373,8 +384,13 @@ def occ_mass_properties(shape, density=1.0):
     from OCP.GProp import GProp_GProps
     from OCP.BRepGProp import BRepGProp
 
+    # Handle build123d objects
+    if hasattr(shape, "wrapped"):
+        shape = shape.wrapped
+
     props = GProp_GProps()
-    BRepGProp.VolumeProperties_s(shape, props)
+    # Signature: shape, props, tolerance, skip_shared
+    BRepGProp.VolumeProperties_s(shape, props, tolerance, False)
 
     volume = props.Mass()
     cg = props.CentreOfMass()

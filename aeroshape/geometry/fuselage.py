@@ -153,6 +153,40 @@ class MultiSegmentFuselage:
         # Shell (open ends), not a fully watertight solid by default.
         return NurbsSurfaceBuilder.loft(wires, solid=False, ruled=False)
 
+    def to_occ_segments(self, solid=True, max_sections=15):
+        """Build individual NURBS lofts for cada segment, splitting large ones.
+
+        Returns
+        -------
+        list of Shape
+            List of lofted segments (build123d objects).
+        """
+        from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
+        
+        frames = self.get_section_frames()
+        if len(frames) < 2:
+            return []
+            
+        segments = []
+        n_total = len(frames)
+        
+        i = 0
+        while i < n_total - 1:
+            j = min(i + max_sections, n_total)
+            chunk_frames = frames[i:j]
+            if len(chunk_frames) >= 2:
+                wires = []
+                for fr in chunk_frames:
+                    wire = fr["profile"].to_occ_wire(
+                        position=(fr["x"], fr["y_offset"], fr["z_offset"])
+                    )
+                    wires.append(wire)
+                segments.append(NurbsSurfaceBuilder.loft(wires, solid=solid))
+            
+            i = j - 1
+            
+        return segments
+
     def to_vertex_grids(self, num_points_profile=50,
                         lengthwise_clustering=None,
                         profile_clustering=None):
@@ -194,22 +228,64 @@ class MultiSegmentFuselage:
     def compute_properties(self, method="gvm", density=1.0,
                            num_points_profile=50,
                            lengthwise_clustering=None,
-                           profile_clustering=None):
+                           profile_clustering=None,
+                           uproc=False, tolerance=None):
         """Compute volume, mass, CG, and inertia using the chosen method."""
         method = method.lower()
         if method == "occ":
-            from aeroshape.nurbs.utils import occ_mass_properties
-            shape = self.to_occ_shape()
-            props = occ_mass_properties(shape, density)
-            com = props["center_of_mass"]
-            imat = props["inertia_matrix"]
-            return {
-                "volume": props["volume"],
-                "mass": props["mass"],
-                "cg": np.array(com),
-                "inertia": (imat[0, 0], imat[1, 1], imat[2, 2],
-                            imat[0, 1], imat[0, 2], imat[1, 2]),
-            }
+            if uproc:
+                # Parallelize across segments using the same dispatcher as AircraftModel
+                from aeroshape.nurbs.utils import occ_mass_properties
+                from multiprocessing import Pool, cpu_count
+                
+                segments = self.to_occ_segments()
+                with Pool(processes=cpu_count()) as pool:
+                    results = pool.starmap(occ_mass_properties, [(s, density, tolerance) for s in segments])
+                
+                # Combine results
+                total_volume = sum(r["volume"] for r in results)
+                total_mass = sum(r["mass"] for r in results)
+                
+                if total_mass > 0:
+                    cg_weighted_sum = np.zeros(3)
+                    for r in results:
+                        cg_weighted_sum += np.array(r["center_of_mass"]) * r["mass"]
+                    total_cg = cg_weighted_sum / total_mass
+                    
+                    # Parallel Axis Theorem for inertia tensor summation
+                    total_imat = np.zeros((3, 3))
+                    for r in results:
+                        mi = r["mass"]
+                        ci = np.array(r["center_of_mass"])
+                        # Inertia about global CG: I_global = I_local + m * ( |d|^2 * E - d * d^T )
+                        d = ci - total_cg
+                        d2 = np.dot(d, d)
+                        steiner = mi * (d2 * np.eye(3) - np.outer(d, d))
+                        total_imat += r["inertia_matrix"] + steiner
+                else:
+                    total_cg = np.zeros(3)
+                    total_imat = np.zeros((3, 3))
+
+                return {
+                    "volume": total_volume,
+                    "mass": total_mass,
+                    "cg": total_cg,
+                    "inertia": (total_imat[0, 0], total_imat[1, 1], total_imat[2, 2],
+                                total_imat[0, 1], total_imat[0, 2], total_imat[1, 2]),
+                }
+            else:
+                from aeroshape.nurbs.utils import occ_mass_properties
+                shape = self.to_occ_shape()
+                props = occ_mass_properties(shape, density, tolerance)
+                com = props["center_of_mass"]
+                imat = props["inertia_matrix"]
+                return {
+                    "volume": props["volume"],
+                    "mass": props["mass"],
+                    "cg": np.array(com),
+                    "inertia": (imat[0, 0], imat[1, 1], imat[2, 2],
+                                imat[0, 1], imat[0, 2], imat[1, 2]),
+                }
 
         from aeroshape.analysis.volume import VolumeCalculator
         from aeroshape.analysis.mass import MassPropertiesCalculator

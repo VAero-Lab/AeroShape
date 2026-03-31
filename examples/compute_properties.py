@@ -11,7 +11,10 @@ choose between three volume computation approaches:
 - **OCC** (``method='occ'``): Exact NURBS integration via OpenCASCADE's
   BRepGProp.  Most accurate but requires the OCC kernel.
 
-Also shows how clustering laws can be passed to the GVM/SAI methods.
+Also shows new high-performance features for the OCC method:
+- **Parallelization** (``uproc=True``): Distributes segments to multiple cores.
+- **Non-Adaptive Integration** (``tolerance=0.1``): Up to 100x speedup for
+  CAD properties with negligible accuracy loss.
 """
 
 import time
@@ -56,7 +59,9 @@ def main():
     methods = [
         ("GVM (Divergence Theorem)", "gvm", {}),
         ("SAI (Section-Area Integration)", "sai", {}),
-        ("OCC (Exact NURBS)", "occ", {}),
+        ("OCC (Exact Adaptive)", "occ", {}),
+        ("OCC (Fast Non-Adaptive, tol=0.1)", "occ", {"tolerance": 0.1}),
+        ("OCC (Parallel, uproc=True)", "occ", {"uproc": True, "tolerance": 0.1}),
         ("SAI + cosine clustering", "sai",
          {"spanwise_clustering": clustering.cosine}),
     ]

@@ -9,6 +9,7 @@ import os
 import sys
 import math
 import numpy as np
+import time
 
 from aeroshape import AircraftModel, show_interactive
 from aeroshape.geometry.fuselage import FuselageSegment, MultiSegmentFuselage
@@ -70,23 +71,35 @@ def create_glider_wings() -> list:
     return wings
 
 def main():
+    start_time = time.time()
     ac = AircraftModel("Experimental Glider")
     ac.add_fuselage(create_glider_fuselage())
     for w, p in create_glider_wings():
         ac.add_wing(w, origin=p)
+    end_time = time.time()
+    print(f"Time to create aircraft: {end_time - start_time:.2f} seconds")
 
-    props = ac.compute_properties(method='gvm', density=300.0) # Extremely light foam/carbon
+    start_time2 = time.time()
+    # Compute high-fidelity mass properties in parallel with non-adaptive integration   
+    props = ac.compute_properties(method='occ', density=300.0, uproc=True, tolerance=0.1)
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
+    end_time2 = time.time()
+    print(f"Time to compute properties: {end_time2 - start_time2:.2f} seconds")
 
-    os.makedirs("Exports", exist_ok=True)
+    start_time3 = time.time()
+    # Native representation STEP export (optimized assembly-aware writer)
     from aeroshape.nurbs.export import NurbsExporter
+    os.makedirs("Exports", exist_ok=True)
     export_path = "Exports/aircraft_experimental_glider.step"
-    NurbsExporter.to_step(ac.to_occ_shape(fuse=False), export_path)
+    NurbsExporter.to_step(ac.to_occ_shape(), export_path)
     print(f"Exported STEP model to {export_path}")
-
+    end_time3 = time.time()
+    print(f"Time to export STEP: {end_time3 - start_time3:.2f} seconds")
+    
     if "--no-show" not in sys.argv:
-        show_interactive(ac.to_triangles(num_points_profile=80), props['volume'], props['mass'], props['cg'], props['inertia'], title="Experimental Glider")
+        tris = ac.to_triangles(num_points_profile=80)
+        show_interactive(tris, props['volume'], props['mass'], props['cg'], props['inertia'], title="Experimental Glider")
 
 if __name__ == "__main__":
     main()

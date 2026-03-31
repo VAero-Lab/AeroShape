@@ -8,6 +8,8 @@ outer multi-segment wings. Highlights spatial assembly and positioning.
 import os
 import sys
 import math
+import time
+
 from aeroshape import AircraftModel, show_interactive
 from aeroshape.geometry.fuselage import FuselageSegment, MultiSegmentFuselage
 from aeroshape.geometry.cross_sections import EllipticalProfile
@@ -70,6 +72,7 @@ def create_wings() -> list:
     ]
 
 def main():
+    start_time = time.time()
     ac = AircraftModel("Twin-Boom Demo")
 
     # 1. The Central Pod
@@ -85,19 +88,30 @@ def main():
     # 3. All Wing Segments
     for w, p in create_wings():
         ac.add_wing(w, origin=p)
+    end_time = time.time()
+    print(f"Time to create aircraft: {end_time - start_time:.2f} seconds")
 
-    props = ac.compute_properties(method='gvm', density=2700.0) 
+    # Compute high-fidelity mass properties in parallel with non-adaptive integration
+    start_time1 = time.time()
+    props = ac.compute_properties(method='occ', density=2700.0, uproc=True, tolerance=0.1) 
+    end_time1 = time.time()
+    print(f"Time to compute properties: {end_time1 - start_time1:.2f} seconds")
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
 
-    os.makedirs("Exports", exist_ok=True)
+    start_time2 = time.time()
+    # Native representation STEP export (optimized assembly-aware writer)
     from aeroshape.nurbs.export import NurbsExporter
+    os.makedirs("Exports", exist_ok=True)
     export_path = "Exports/aircraft_twin_boom.step"
-    NurbsExporter.to_step(ac.to_occ_shape(fuse=False), export_path)
+    NurbsExporter.to_step(ac.to_occ_shape(), export_path)
     print(f"Exported Assembly to {export_path}")
-
+    end_time2 = time.time()
+    print(f"Time to export STEP: {end_time2 - start_time2:.2f} seconds")
+    
     if "--no-show" not in sys.argv:
-        show_interactive(ac.to_triangles(num_points_profile=80), props['volume'], props['mass'], props['cg'], props['inertia'], title="Twin Boom Aircraft")
+        tris = ac.to_triangles(num_points_profile=80)
+        show_interactive(tris, props['volume'], props['mass'], props['cg'], props['inertia'], title="Twin Boom Aircraft")
 
 if __name__ == "__main__":
     main()
