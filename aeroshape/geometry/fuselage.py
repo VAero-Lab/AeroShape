@@ -61,6 +61,10 @@ class FuselageSegment:
     blend_curve: Optional[Callable[[float], float]] = None
     guide_curve_y: Optional[Callable[[float], float]] = None
     guide_curve_z: Optional[Callable[[float], float]] = None
+    cap_threshold: float = 0.05
+
+
+
 
 
 @dataclass
@@ -105,6 +109,12 @@ class MultiSegmentFuselage:
 
             if lengthwise_clustering is not None:
                 t_values = lengthwise_clustering(n)
+            elif seg.blend_curve:
+                # Use half-cosine clustering for rounded ends (nose/tail) 
+                # to better capture steep curvature near poles.
+                theta_vals = np.linspace(0.0, np.pi/2.0, n)
+                t_values = np.sin(theta_vals) if seg_idx == 0 else 1.0 - np.cos(theta_vals)
+                if n == 1: t_values = np.array([1.0])
             else:
                 t_values = np.linspace(0.0, 1.0, n) if n > 1 else np.array([1.0])
 
@@ -113,9 +123,14 @@ class MultiSegmentFuselage:
 
                 x = x_accum + t * seg.length
                 
-                # Apply explicit nonlinear guide curves if provided, else smooth transitioning (to prevent OCC loft protuberances)
-                dy = seg.guide_curve_y(t) if seg.guide_curve_y else _smooth_offset(t) * seg.y_offset
-                dz = seg.guide_curve_z(t) if seg.guide_curve_z else _smooth_offset(t) * seg.z_offset
+                # Use the blend curve for offset smoothing when available,
+                # so the cross-section center trajectory follows the same
+                # mathematical function as the profile scaling (prevents
+                # offset/size mismatch that causes loft artifacts).
+                offset_fn = seg.blend_curve if seg.blend_curve else _smooth_offset
+
+                dy = seg.guide_curve_y(t) if seg.guide_curve_y else offset_fn(t) * seg.y_offset
+                dz = seg.guide_curve_z(t) if seg.guide_curve_z else offset_fn(t) * seg.z_offset
                 
                 y = y_accum + dy
                 z = z_accum + dz
@@ -138,23 +153,37 @@ class MultiSegmentFuselage:
 
         return frames
 
-    def to_occ_shape(self):
-        """Build a NURBS lofted surface through all section wires."""
-        from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
-        
-        frames = self.get_section_frames()
+
+
+    @staticmethod
+    def _build_wires_from_frames(frames):
+        """Convert a list of frames into OCC wires."""
         wires = []
         for fr in frames:
             wire = fr["profile"].to_occ_wire(
                 position=(fr["x"], fr["y_offset"], fr["z_offset"])
             )
             wires.append(wire)
+        return wires
 
-        # Shell (open ends), not a fully watertight solid by default.
-        return NurbsSurfaceBuilder.loft(wires, solid=False, ruled=False)
+    # ── OCC shape construction ────────────────────────────────────
+
+    def to_occ_shape(self):
+        """Build a NURBS lofted surface through all section wires.
+
+        Relies on native OCC ellipse wires (from ``EllipticalProfile``)
+        for consistent parameterisation at every scale, producing smooth
+        lofts without pinch artifacts.  All sections, including very
+        small terminal profiles, are included in the loft.
+        """
+        from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
+
+        frames = self.get_section_frames()
+        wires = self._build_wires_from_frames(frames)
+        return NurbsSurfaceBuilder.loft(wires, solid=True, ruled=False)
 
     def to_occ_segments(self, solid=True, max_sections=15):
-        """Build individual NURBS lofts for cada segment, splitting large ones.
+        """Build individual NURBS lofts for each segment, splitting large ones.
 
         Returns
         -------
@@ -162,29 +191,24 @@ class MultiSegmentFuselage:
             List of lofted segments (build123d objects).
         """
         from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
-        
+
         frames = self.get_section_frames()
         if len(frames) < 2:
             return []
-            
+
         segments = []
         n_total = len(frames)
-        
+
         i = 0
         while i < n_total - 1:
             j = min(i + max_sections, n_total)
             chunk_frames = frames[i:j]
             if len(chunk_frames) >= 2:
-                wires = []
-                for fr in chunk_frames:
-                    wire = fr["profile"].to_occ_wire(
-                        position=(fr["x"], fr["y_offset"], fr["z_offset"])
-                    )
-                    wires.append(wire)
+                wires = self._build_wires_from_frames(chunk_frames)
                 segments.append(NurbsSurfaceBuilder.loft(wires, solid=solid))
-            
+
             i = j - 1
-            
+
         return segments
 
     def to_vertex_grids(self, num_points_profile=50,
@@ -310,8 +334,57 @@ class MultiSegmentFuselage:
             "inertia": inertia,
         }
 
+    def show(self, method='occ', uproc=True, tolerance=0.1, props=None, **kwargs):
+        """Launch the high-fidelity interactive CAD viewer for this fuselage.
+
+        Parameters
+        ----------
+        method : str
+            Analysis method (ignored if `props` is provided).
+        uproc : bool
+            Enable parallel analysis across segments.
+        tolerance : float
+            Integration tolerance.
+        props : dict or None
+            Manual properties dictionary (volume, mass, cg, inertia).
+        **kwargs : dict
+            Additional arguments for `show_interactive`.
+        """
+        from aeroshape.visualization.rendering import show_interactive
+        if props is None:
+            props = self.compute_properties(method=method, uproc=uproc, tolerance=tolerance)
+            
+        # 2. Get NURBS sampling grids (standard lattice look)
+        X, Y, Z = self.to_vertex_grids(num_points_profile=80)
+        grids = [(X, Y, Z, self.name, False)]
+        
+        # 3. Launch viewer
+        show_interactive(
+            grids, 
+            props['volume'], props['mass'], props['cg'], props['inertia'],
+            title=kwargs.pop('title', self.name),
+            **kwargs
+        )
+
 def _interpolate_profiles(root: CrossSectionProfile, tip: CrossSectionProfile, t: float) -> CrossSectionProfile:
-    """Linearly interpolate between two cross-section profiles."""
+    """Linearly interpolate between two cross-section profiles.
+
+    When both *root* and *tip* are ``EllipticalProfile`` objects the
+    result is also an ``EllipticalProfile`` so that native OCC ellipse
+    wires are used during lofting (consistent parameterisation at every
+    scale).
+    """
+    from aeroshape.geometry.cross_sections import EllipticalProfile
+
+    # Fast path: both profiles are elliptical → interpolate semi-axes
+    if (hasattr(root, '_semi_y') and hasattr(tip, '_semi_y')):
+        sy = (1 - t) * root._semi_y + t * tip._semi_y
+        sz = (1 - t) * root._semi_z + t * tip._semi_z
+        num_pts = max(len(root.y), len(tip.y))
+        return EllipticalProfile(width=2 * sy, height=2 * sz,
+                                 num_points=num_pts, name=root.name)
+
+    # General path: interpolate point arrays
     ry = root.y
     rz = root.z
     ty = tip.y

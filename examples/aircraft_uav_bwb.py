@@ -94,7 +94,7 @@ def main():
     print(f"Time to export STEP: {end_time2 - start_time2:.2f} seconds")
     
     if "--no-show" not in sys.argv:
-        show_interactive(ac.to_triangles(), props['volume'], props['mass'], props['cg'], props['inertia'], title="UAV Assembly")
+        ac.show()
 
 if __name__ == "__main__":
     main()

@@ -18,6 +18,7 @@ from aeroshape import (
     show_interactive,
 )
 from aeroshape import MeshTopologyManager
+import sys
 
 
 def main():
@@ -74,10 +75,11 @@ def main():
     print(f"\nMass (aluminum shell): {mass:.4f} kg")
     print(f"Center of Mass: X={cg[0]:.5f}, Y={cg[1]:.5f}, Z={cg[2]:.5f}")
 
-    show_interactive(
-        solid_triangles, volume_exact, mass, cg, inertia,
-        title="AeroShape - Thin Shell Wing (1 mm aluminum)",
-    )
+    if "--no-show" not in sys.argv:
+        wing.show(
+            props={"volume": volume_exact, "mass": mass, "cg": cg, "inertia": inertia},
+            title="AeroShape - Thin Shell Wing (1 mm aluminum)"
+        )
 
 
 if __name__ == "__main__":

@@ -6,9 +6,9 @@ Provides two rendering backends:
   and reports.  Four orthographic projections (front, top, side, isometric)
   with a properties annotation box.
 
-- **Vedo / VTK** (interactive): CAD-like 3D viewer with rotate, zoom, and pan.
-  Renders the surface with realistic lighting, a centre-of-mass sphere, and
-  an on-screen properties panel.
+- **Vedo / VTK** (interactive): Professional CAD-like 3D viewer with navigation cube, 
+  rotate, zoom, and pan. Renders the surface with realistic lighting, smooth 
+  NURBS-derived edges, and an on-screen properties panel.
 
 Both backends share a common data interface: they accept the triangle list
 produced by MeshTopologyManager together with the scalar results from
@@ -95,24 +95,24 @@ def show_interactive(
     mass,
     center_of_mass,
     inertia=None,
-    title="AeroShape",
-    surface_color="gold",
-    surface_opacity=0.8,
+    title="AeroShape CAD Viewer",
+    surface_color="#ACB5BD",
+    surface_opacity=1,
     cg_color="red",
-    cg_radius=None,
-    window_size=(1000, 800),
+    window_size=(1200, 900),
     background="white",
     save_screenshot=None,
+    backend="vedo"
 ):
-    """Launch an interactive 3-D viewer using Plotly.
+    """Launch a high-fidelity interactive CAD viewer.
 
-    Replaces the 'vedo' dependency with 'plotly'. Provides zoom, rotate,
-    pan, and high-fidelity B-rep edges if a build123d shape is provided.
+    Standard backend is 'vedo' (VTK-based), which provides a professional
+    CAD look with navigation cube, perspective views, and smooth rendering.
 
     Parameters
     ----------
     triangles : list of tuple or build123d.Shape
-        Tessellated exterior boundaries or a build123d Shape.
+        Tessellated exterior boundaries or a build123d/OCP Shape.
     volume, mass : float
         Computed volume and mass.
     center_of_mass : tuple of float
@@ -122,124 +122,119 @@ def show_interactive(
     title : str
         Viewer title.
     surface_color : str
-        Surface color.
+        Surface color (hex or name).
     surface_opacity : float
         Surface opacity (0-1).
     cg_color : str
         Colour for the centre-of-mass marker.
-    cg_radius : float or None
-        Marker size.
     window_size : tuple of int
-        (width, height) of the viewer (in some contexts).
+        Size of the window.
     background : str
         Background colour.
     save_screenshot : str or None
-        If given, save as an HTML file (Plotly doesn't directly save PNG easily without extra deps).
+        Path to save a PNG screenshot.
+    backend : str
+        'vedo' (default) or 'ocp_vscode' (if available).
     """
-    import plotly.graph_objects as go
-    from build123d import Shape, Edge
+    if backend == "ocp_vscode":
+        try:
+            from ocp_vscode import show
+            # Try to pass the shape directly if it's there
+            if hasattr(triangles, "wrapped") or str(type(triangles)).find("TopoDS_Shape") != -1:
+                show(triangles, names=[title], collapse="all")
+                return
+        except ImportError:
+            pass
 
-    # 1. Prepare Mesh Data
-    if hasattr(triangles, "wrapped") or str(type(triangles)).find("TopoDS_Shape") != -1:
+    import vedo
+
+    objs = []
+    
+    # 1. Prepare Mesh (Grid-based or Triangle-based)
+    if isinstance(triangles, list) and len(triangles) > 0 and isinstance(triangles[0], tuple) and len(triangles[0]) == 5:
+        # It's a list of (X, Y, Z, name, is_mirrored) grids - original NURBS sampling look!
+        for X, Y, Z, name, is_mirrored in triangles:
+            from aeroshape.analysis.mesh import MeshTopologyManager
+            tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=True)
+            if is_mirrored:
+                tris = [(A, C, B) for (A, B, C) in tris]
+            
+            verts, faces = _triangles_to_arrays(tris)
+            surf = vedo.Mesh([verts, faces])
+            surf.c(surface_color).alpha(surface_opacity)
+            surf.compute_normals().lighting("plastic")
+            objs.append(surf)
+
+            # # Create lattice (wireframe)
+            # lattice = surf.clone().wireframe().c("black").alpha(0)
+            # objs.append(lattice)
+
+    elif hasattr(triangles, "wrapped") or str(type(triangles)).find("TopoDS_Shape") != -1:
         # It's a build123d/OCP object
         from aeroshape.nurbs.utils import tessellate_shape
         occ_shape = triangles.wrapped if hasattr(triangles, "wrapped") else triangles
-        b123_shape = Shape(occ_shape)
-        
-        tris = tessellate_shape(occ_shape)
+        tris = tessellate_shape(occ_shape, linear_deflection=0.005, angular_deflection=0.1)
         verts, faces = _triangles_to_arrays(tris)
         
-        # Extract B-rep edges for high-fidelity look
-        edge_traces = []
+        mesh = vedo.Mesh([verts, faces])
+        mesh.c(surface_color).alpha(surface_opacity)
+        mesh.compute_normals().lighting("plastic")
+        
+        # B-rep edges
+        from build123d import Shape
+        b123_shape = Shape(occ_shape)
+        lines = []
         for edge in b123_shape.edges():
             pts = edge.tessellate(1e-3)
-            ex = [p.X for p in pts]
-            ey = [p.Y for p in pts]
-            ez = [p.Z for p in pts]
-            edge_traces.append(go.Scatter3d(
-                x=ex, y=ey, z=ez,
-                mode='lines',
-                line=dict(color='black', width=3),
-                showlegend=False,
-                hoverinfo='none'
-            ))
+            line_pts = [[p.X, p.Y, p.Z] for p in pts]
+            lines.append(vedo.Line(line_pts, c="black", lw=1))
+        
+        objs = [mesh] + lines
     else:
-        # It's a list of triangles
+        # raw triangles
         verts, faces = _triangles_to_arrays(triangles)
-        edge_traces = []
-        # In this case, we don't have B-rep info, so we just show the mesh edges if desired
-        # but the user wanted 'Outer Mold' edges only. Without B-rep, that's hard.
-        # We'll just show the mesh.
+        mesh = vedo.Mesh([verts, faces])
+        mesh.c(surface_color).alpha(surface_opacity)
+        mesh.compute_normals().lighting("plastic")
+        objs = [mesh]
 
-    # 2. Create the Mesh3d trace
-    mesh_trace = go.Mesh3d(
-        x=verts[:, 0], y=verts[:, 1], z=verts[:, 2],
-        i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
-        color=surface_color,
-        opacity=surface_opacity,
-        lighting=dict(
-            ambient=0.4,
-            diffuse=0.6,
-            fresnel=0.2,
-            specular=0.3,
-            roughness=0.4
-        ),
-        lightposition=dict(x=100, y=200, z=150),
-        name="Lifting Surface",
-        showlegend=True
-    )
-
-    # 3. CG Marker
+    # 2. Add CG Marker
     cx, cy, cz = center_of_mass
-    cg_trace = go.Scatter3d(
-        x=[cx], y=[cy], z=[cz],
-        mode='markers',
-        marker=dict(size=8, color=cg_color, symbol='diamond'),
-        name="Center of Mass"
+    cg_sphere = vedo.Sphere(pos=[cx, cy, cz], r=0.25, c=cg_color)
+    diag = 1.0
+    meshes = [o for o in objs if isinstance(o, (vedo.Mesh, vedo.Line, vedo.Points))]
+    if meshes:
+        # Use first mesh for diagonal if available
+        diag = max(m.diagonal_size() if hasattr(m, 'diagonal_size') else 1.0 for m in meshes)
+    # cg_sphere.scale(diag * 0.1)
+    # cg_sphere.name = "Center of Mass"
+    # objs.append(cg_sphere)
+
+    # 3. Create Plotter
+    plt = vedo.Plotter(
+        title=title, 
+        size=window_size, 
+        bg=background, 
+        axes=14,          # Orientation widget (triad/cube)
+        interactive=True
     )
 
-    # 4. Properties Annotation
+
+    # 5. Properties Text Box
     props_text = _build_props_text(volume, mass, center_of_mass, inertia)
-    # Convert to HTML-like for Plotly
-    props_html = props_text.replace("\n", "<br>")
-    
-    layout = go.Layout(
-        title=dict(text=title, x=0.5, y=0.95),
-        scene=dict(
-            xaxis_title="X (Chordwise)",
-            yaxis_title="Y (Spanwise)",
-            zaxis_title="Z (Thickness)",
-            aspectmode='data',
-            bgcolor=background
-        ),
-        paper_bgcolor=background,
-        margin=dict(l=0, r=0, b=0, t=40),
-        annotations=[
-            dict(
-                text=f"<b>Geometric & Mass Properties</b><br>{props_html}",
-                align='left',
-                showarrow=False,
-                xref='paper', yref='paper',
-                x=0.02, y=0.05,
-                bgcolor='white',
-                bordercolor='black',
-                borderwidth=1,
-                font=dict(family="Courier New", size=12)
-            )
-        ]
-    )
+    props_actor = vedo.Text2D(props_text, pos="bottom-left", s=0.7, c="black", bg="white", alpha=0.8)
+    objs.append(props_actor)
 
-    fig = go.Figure(data=[mesh_trace, cg_trace] + edge_traces, layout=layout)
-
-    if save_screenshot:
-        if save_screenshot.endswith(".html"):
-            fig.write_html(save_screenshot)
-        else:
-            # Requires kaleido, which might not be there. Fallback to html.
-            fig.write_html(save_screenshot + ".html")
-        print(f"Interactive view saved to {save_screenshot}")
-    else:
-        fig.show()
+    # 6. Show everything
+    plt.show(
+        objs,
+        camera={
+            'pos': [cx - diag*3, cy + diag*0.5, cz + diag*0.5],
+            'focal_point': [cx, cy, cz],
+            'viewup': [0, 0, 1],
+        },
+        interactive=True
+    ).close()
 
 
 # =====================================================================

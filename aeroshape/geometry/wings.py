@@ -640,6 +640,38 @@ class MultiSegmentWing:
             "inertia": inertia,
         }
 
+    def show(self, method='occ', uproc=True, tolerance=0.1, props=None, **kwargs):
+        """Launch the high-fidelity interactive CAD viewer for this wing.
+
+        Parameters
+        ----------
+        method : str
+            Analysis method (ignored if `props` is provided).
+        uproc : bool
+            Enable parallel analysis across wing segments.
+        tolerance : float
+            Integration tolerance.
+        props : dict or None
+            Manual properties dictionary (volume, mass, cg, inertia).
+        **kwargs : dict
+            Additional arguments for `show_interactive`.
+        """
+        from aeroshape.visualization.rendering import show_interactive
+        if props is None:
+            props = self.compute_properties(method=method, uproc=uproc, tolerance=tolerance)
+        
+        # 2. Get NURBS sampling grids (standard lattice look)
+        X, Y, Z = self.to_vertex_grids(num_points_profile=80)
+        grids = [(X, Y, Z, self.name, False)]
+        
+        # 3. Launch viewer
+        show_interactive(
+            grids, 
+            props['volume'], props['mass'], props['cg'], props['inertia'],
+            title=kwargs.pop('title', self.name),
+            **kwargs
+        )
+
 
 # ── Helpers ───────────────────────────────────────────────────────
 

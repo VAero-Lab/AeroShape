@@ -131,7 +131,7 @@ def make_bspline_from_control_points(poles_3d, knots, multiplicities, degree,
 
 # ── Tessellation ────────────────────────────────────────────────
 
-def tessellate_shape(shape, linear_deflection=0.1, angular_deflection=0.5):
+def tessellate_shape(shape, linear_deflection=0.005, angular_deflection=0.1):
     """Tessellate an OCC shape into triangles.
 
     Parameters

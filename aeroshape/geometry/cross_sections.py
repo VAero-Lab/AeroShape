@@ -34,6 +34,55 @@ class CrossSectionProfile:
     z: np.ndarray = field(default_factory=lambda: np.array([]))
     name: str = ""
 
+    def is_degenerate(self, threshold=0.05):
+        """Check if this profile is too small to loft reliably.
+
+        A degenerate profile should be replaced by a vertex cap in the
+        lofting operation to avoid surface folding artifacts.
+
+        Parameters
+        ----------
+        threshold : float
+            Maximum bounding-box diagonal (in meters) below which the
+            profile is considered degenerate.  Default 0.05 m.
+
+        Returns
+        -------
+        bool
+        """
+        if len(self.y) == 0 or len(self.z) == 0:
+            return True
+        width = float(self.y.max() - self.y.min())
+        height = float(self.z.max() - self.z.min())
+        diagonal = math.sqrt(width**2 + height**2)
+        return diagonal < threshold
+
+    def centroid(self):
+        """Return the (y, z) centroid of the profile.
+
+        Returns
+        -------
+        tuple of float
+            (y_center, z_center)
+        """
+        if len(self.y) == 0 or len(self.z) == 0:
+            return (0.0, 0.0)
+        return (float(self.y.mean()), float(self.z.mean()))
+
+    def bounding_size(self):
+        """Return the bounding-box diagonal of the profile.
+
+        Returns
+        -------
+        float
+            Diagonal of the YZ bounding box in meters.
+        """
+        if len(self.y) == 0 or len(self.z) == 0:
+            return 0.0
+        width = float(self.y.max() - self.y.min())
+        height = float(self.z.max() - self.z.min())
+        return math.sqrt(width**2 + height**2)
+
     def to_occ_wire(self, position=(0.0, 0.0, 0.0)):
         """Convert to an OpenCASCADE B-spline wire.
         
@@ -97,6 +146,49 @@ class EllipticalProfile(CrossSectionProfile):
         y = a * np.cos(theta)
         z = b * np.sin(theta)
         super().__init__(y=y, z=z, name=name)
+        # Store semi-axes for native OCC wire construction
+        self._semi_y = a
+        self._semi_z = b
+
+    def to_occ_wire(self, position=(0.0, 0.0, 0.0)):
+        """Create a native OCC ellipse (or circle) wire.
+
+        Uses ``gp_Elips`` / ``gp_Circ`` for exact geometry and
+        consistent parameterisation at every scale, avoiding the
+        pinch artifacts of point-cloud B-spline fitting.
+        """
+        from OCP.gp import gp_Pnt, gp_Dir, gp_Ax2, gp_Circ, gp_Elips
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire
+
+        x_off, y_off, z_off = position
+        semi_y = abs(self._semi_y)
+        semi_z = abs(self._semi_z)
+
+        major = max(semi_y, semi_z)
+        minor = min(semi_y, semi_z)
+
+        if major < 1e-10:
+            # Truly degenerate — fallback to point-cloud B-spline
+            return super().to_occ_wire(position)
+
+        center = gp_Pnt(float(x_off), float(y_off), float(z_off))
+
+        if abs(major - minor) < 1e-10:
+            # Circle
+            axis = gp_Ax2(center, gp_Dir(1, 0, 0), gp_Dir(0, 1, 0))
+            circ = gp_Circ(axis, major)
+            edge = BRepBuilderAPI_MakeEdge(circ).Edge()
+        else:
+            # Ellipse — orient so major axis direction is correct
+            if semi_y >= semi_z:
+                ax = gp_Ax2(center, gp_Dir(1, 0, 0), gp_Dir(0, 1, 0))
+            else:
+                ax = gp_Ax2(center, gp_Dir(1, 0, 0), gp_Dir(0, 0, 1))
+            elips = gp_Elips(ax, major, minor)
+            edge = BRepBuilderAPI_MakeEdge(elips).Edge()
+
+        return BRepBuilderAPI_MakeWire(edge).Wire()
+
 
 
 from dataclasses import dataclass, field

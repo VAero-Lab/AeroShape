@@ -113,6 +113,7 @@ def main():
     print(f"Exported Assembly to {export_path}")
 
     if "--no-show" not in sys.argv:
-        show_interactive(ac.to_triangles(num_points_profile=80), props['volume'], props['mass'], props['cg'], props['inertia'], title="Box Wing (50m Span)")
+        ac.show()
+
 if __name__ == "__main__":
     main()

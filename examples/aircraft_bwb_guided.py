@@ -124,10 +124,7 @@ def main():
     
     # ── Visualize ────────────────────────────────────────────────
     if "--no-show" not in sys.argv:
-        # Use high resolution for smooth visual appearance
-        tris = model.to_triangles(num_points_profile=100)
-        show_interactive(tris, volume, mass, cg, inertia,
-                         title=model.name)
+        model.show()
 
 
 if __name__ == "__main__":

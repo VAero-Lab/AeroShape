@@ -98,8 +98,7 @@ def main():
     print(f"Time to export STEP: {end_time3 - start_time3:.2f} seconds")
     
     if "--no-show" not in sys.argv:
-        tris = ac.to_triangles(num_points_profile=80)
-        show_interactive(tris, props['volume'], props['mass'], props['cg'], props['inertia'], title="Experimental Glider")
+        ac.show()
 
 if __name__ == "__main__":
     main()

@@ -106,8 +106,8 @@ class AircraftModel:
             if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
                 trsf = gp_Trsf()
                 trsf.SetTranslation(gp_Vec(ox, oy, oz))
-                # copy=False to share geometry (faster assembly and smaller export)
-                shape_trans = BRepBuilderAPI_Transform(occ_shape, trsf, False).Shape()
+                # copy=True to ensure independent geometry for export robustness
+                shape_trans = BRepBuilderAPI_Transform(occ_shape, trsf, True).Shape()
                 shapes.append(shape_trans)
             else:
                 shapes.append(occ_shape)
@@ -116,13 +116,13 @@ class AircraftModel:
                 # Mirror across the local XZ plane (Y=0), then apply offset
                 mirror_trsf = gp_Trsf()
                 mirror_trsf.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0)))
-                mirrored = BRepBuilderAPI_Transform(occ_shape, mirror_trsf, False).Shape()
+                mirrored = BRepBuilderAPI_Transform(occ_shape, mirror_trsf, True).Shape()
                 
                 if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
                     trsf2 = gp_Trsf()
                     # Apply translation mirroring the Y offset naturally
                     trsf2.SetTranslation(gp_Vec(ox, -oy, oz))
-                    mirrored = BRepBuilderAPI_Transform(mirrored, trsf2, False).Shape()
+                    mirrored = BRepBuilderAPI_Transform(mirrored, trsf2, True).Shape()
                 shapes.append(mirrored)
 
         # Process Fuselages
@@ -135,7 +135,7 @@ class AircraftModel:
             if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
                 trsf = gp_Trsf()
                 trsf.SetTranslation(gp_Vec(ox, oy, oz))
-                occ_shape = BRepBuilderAPI_Transform(occ_shape, trsf, False).Shape()
+                occ_shape = BRepBuilderAPI_Transform(occ_shape, trsf, True).Shape()
             shapes.append(occ_shape)
 
         if fuse:
@@ -352,6 +352,45 @@ class AircraftModel:
             "inertia": (sum_I[0, 0], sum_I[1, 1], sum_I[2, 2],
                         sum_I[0, 1], sum_I[0, 2], sum_I[1, 2]),
         }
+    def show(self, method='occ', uproc=True, tolerance=0.1, props=None, **kwargs):
+        """Launch the high-fidelity interactive CAD viewer.
+        
+        This is the recommended way to inspect the aircraft. It uses 
+        OpenCASCADE B-Rep data directly to produce a professional 
+        CAD-like visualization with a navigation cube.
+        
+        Parameters
+        ----------
+        method : str
+            Analysis method used to compute properties for the annotation box.
+        uproc : bool
+            Enable parallel analysis.
+        tolerance : float
+            Integration tolerance for OCC analysis.
+        props : dict or None
+            Manual properties dictionary (volume, mass, cg, inertia).
+        **kwargs : dict
+            Additional arguments passed to `show_interactive` (color, opacity, etc.)
+        """
+        from aeroshape.visualization.rendering import show_interactive
+        
+        # 1. Compute properties for the on-screen display if not provided
+        if props is None:
+            props = self.compute_properties(method=method, uproc=uproc, tolerance=tolerance)
+        
+        # 2. Get NURBS sampling grids (for the original "lattice" look)
+        grids = self.to_vertex_grids_list(num_points_profile=80)
+        
+        # 3. Launch viewer
+        show_interactive(
+            grids, 
+            props['volume'], 
+            props['mass'], 
+            props['cg'], 
+            props['inertia'],
+            title=kwargs.pop('title', self.name),
+            **kwargs
+        )
 
 def _worker_compute_segment_props(task, density, tolerance):
     """Worker function to build a single segment and compute its properties."""

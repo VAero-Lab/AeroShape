@@ -31,24 +31,24 @@ def create_cargo_fuselage() -> MultiSegmentFuselage:
     
     # Exact geometric profiles
     nose_root = EllipticalProfile(width=0.01, height=0.01)    # Spherical coordinate point
-    fuse_mid  = EllipticalProfile(width=4.0, height=4.5)      # Passenger cabin bounds
-    apu_tip   = EllipticalProfile(width=0.4, height=0.4)      # Tail APU exhaust
+    fuse_mid  = EllipticalProfile(width=5, height=5)      # Passenger cabin bounds
+    apu_tip   = EllipticalProfile(width=0.75, height=0.75)      # Tail APU exhaust
 
     # 1. Nose Segment (Exact Ellipsoid boundary, drooping nose)
     fuse.add_segment(FuselageSegment(
-        length=5.0, root_profile=nose_root, tip_profile=fuse_mid, 
+        length=6.0, root_profile=nose_root, tip_profile=fuse_mid, 
         z_offset=-0.6, num_sections=20, blend_curve=ellipsoid_blend
     ))
     
     # 2. Midbody Segment (Constant Tubular Passenger Cabin)
     fuse.add_segment(FuselageSegment(
-        length=25.0, root_profile=fuse_mid, num_sections=5
+        length=24.0, root_profile=fuse_mid, num_sections=20
     ))
     
     # 3. Tail Segment (Paraboloid Ogive geometry, sweeps upward)
     fuse.add_segment(FuselageSegment(
         length=9.0, root_profile=fuse_mid, tip_profile=apu_tip, 
-        z_offset=1.8, num_sections=20, blend_curve=inverse_paraboloid_blend
+        z_offset=1.2, num_sections=40, blend_curve=inverse_paraboloid_blend
     ))
     return fuse
 
@@ -110,7 +110,7 @@ def main():
     print(f"Exported Assembly to {export_path}")
 
     if "--no-show" not in sys.argv:
-        show_interactive(ac.to_triangles(num_points_profile=80), props['volume'], props['mass'], props['cg'], props['inertia'], title="Military Cargo")
+        ac.show()
 
 if __name__ == "__main__":
     main()

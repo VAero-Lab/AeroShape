@@ -183,3 +183,24 @@ class NurbsSurfaceBuilder:
             else:
                 processed_shapes.append(s)
         return Compound(processed_shapes)
+
+    @staticmethod
+    def is_valid_solid(shape):
+        """Check if an OCC shape is a valid, watertight solid.
+        
+        Uses BRepCheck_Analyzer to verify topological integrity.
+        """
+        from OCP.BRepCheck import BRepCheck_Analyzer
+        from OCP.TopoDS import TopoDS_Solid
+        occ_shape = getattr(shape, "wrapped", shape)
+        
+        # Verify it's structurally valid according to OCC
+        analyzer = BRepCheck_Analyzer(occ_shape)
+        if not analyzer.IsValid():
+            return False
+            
+        # Also verify it's a solid (or a compound containing solids)
+        if occ_shape.ShapeType() == 0: # TopAbs_COMPOUND
+            return True # Assume compound validity is enough or check sub-shapes
+        
+        return occ_shape.ShapeType() == 2 # TopAbs_SOLID

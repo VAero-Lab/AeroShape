@@ -340,6 +340,10 @@ class AirfoilProfile:
             px = le_x + dx * cos_a + dz * sin_a
             pz = le_z - dx * sin_a + dz * cos_a
 
+        # 3. Ensure topological closure for watertight volumes
+        # Force the last point to be exactly the same as the first point
+        px[-1], pz[-1] = px[0], pz[0]
+
         # Translate to position
         x_off, y_pos, z_off = position
         n = len(px)
@@ -357,7 +361,13 @@ class AirfoilProfile:
             bspline = GeomAPI_PointsToBSpline(arr)
 
         edge = BRepBuilderAPI_MakeEdge(bspline.Curve()).Edge()
-        wire = BRepBuilderAPI_MakeWire(edge).Wire()
+        
+        # Explicitly make wire and ensure it is recognized as closed
+        mk_wire = BRepBuilderAPI_MakeWire(edge)
+        if not mk_wire.IsDone():
+             raise RuntimeError("Failed to create airfoil wire from B-spline edge")
+             
+        wire = mk_wire.Wire()
         return wire
 
 
@@ -486,6 +496,11 @@ class NurbsProfile:
             pz = le_z - dx * sin_a + dz * cos_a
 
         x_off, y_pos, z_off = position
+        
+        # Ensure closure for watertight CAD volumes
+        if len(px) > 2:
+            px[-1], pz[-1] = px[0], pz[0]
+            
         poles_3d = [(px[i] + x_off, y_pos, pz[i] + z_off) for i in range(len(px))]
         weights_list = list(self.weights) if self.weights is not None else None
 
