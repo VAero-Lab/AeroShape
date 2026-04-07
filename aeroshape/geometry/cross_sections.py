@@ -116,8 +116,10 @@ class CrossSectionProfile:
                 float(pz[i]) + z_off,
             ))
 
-        # Periodic (closed) curve is better for fuselages
-        bspline = GeomAPI_PointsToBSpline(arr, 3, 8, GeomAbs_C2, 1e-4)
+        # B-spline approximation: degree 3–5, C2, tolerance 1e-3 mm.
+        # WARNING: Do not increase max_degree above 5 or decrease tolerance
+        # below 1e-3 — causes B-spline pole explosion in lofted surfaces.
+        bspline = GeomAPI_PointsToBSpline(arr, 3, 5, GeomAbs_C2, 1e-3)
         if not bspline.IsDone():
             bspline = GeomAPI_PointsToBSpline(arr)
 

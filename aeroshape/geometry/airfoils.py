@@ -355,8 +355,14 @@ class AirfoilProfile:
                 float(pz[i]) + z_off,
             ))
 
-        # Fit B-spline curve through points
-        bspline = GeomAPI_PointsToBSpline(arr, 3, 8, GeomAbs_C2, 1e-4)
+        # Fit B-spline curve through points.
+        # Degree 3–5, C2 continuity, 1e-3 mm tolerance.
+        # This produces ~45–51 poles regardless of data point count, keeping
+        # lofted surfaces compact for STEP export (~2–5 MB per wing).
+        # WARNING: Do not increase max_degree above 5 or decrease tolerance
+        # below 1e-3 — this causes B-spline pole explosion in lofted surfaces
+        # (e.g. degree 8 + tol 1e-4 → 105 poles/wire → 157K poles/face → 122 MB).
+        bspline = GeomAPI_PointsToBSpline(arr, 3, 5, GeomAbs_C2, 1e-3)
         if not bspline.IsDone():
             bspline = GeomAPI_PointsToBSpline(arr)
 

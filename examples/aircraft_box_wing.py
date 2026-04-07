@@ -79,7 +79,7 @@ def create_box_wings() -> list:
     fin = MultiSegmentWing.create_box_fin(
         lower_wing=lower, upper_wing=upper,
         lower_origin=loc_lower, upper_origin=loc_upper,
-        d_out=3.0, num_sections=40, name="Composite Box Fin"
+        d_out=3.0, num_sections=25, name="Composite Box Fin"
     )
 
     return [

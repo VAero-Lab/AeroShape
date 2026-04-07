@@ -34,15 +34,15 @@ def main():
     start_time = time.time()
     # ── Airfoil profiles at key spanwise stations ────────────────
     # Center body: very thick symmetric (cabin volume)
-    center = AirfoilProfile.from_naca4("0025", num_points=60)
+    center = AirfoilProfile.from_naca4("0025", num_points=40)
     # Inner transition: thick cambered
-    transition = AirfoilProfile.from_naca4("4418", num_points=60)
+    transition = AirfoilProfile.from_naca4("4418", num_points=40)
     # Outboard root: conventional
-    outboard = AirfoilProfile.from_naca4("2412", num_points=60)
+    outboard = AirfoilProfile.from_naca4("2412", num_points=40)
     # Outboard mid: thinner
-    mid_outboard = AirfoilProfile.from_naca4("2410", num_points=60)
+    mid_outboard = AirfoilProfile.from_naca4("2410", num_points=40)
     # Tip: thin symmetric
-    tip = AirfoilProfile.from_naca4("0009", num_points=60)
+    tip = AirfoilProfile.from_naca4("0009", num_points=40)
 
     # ── Leading-edge guide curve ─────────────────────────────────
     # Smooth B-spline fitted through these points (X=chord, Y=span)
@@ -83,7 +83,7 @@ def main():
         le_points=le_points,
         te_points=te_points,
         airfoil_stations=airfoil_stations,
-        num_sections=80,        # dense sections for smooth loft
+        num_sections=25,        # smooth loft, compact STEP (~3 MB/wing half)
         name="BWB (Guide Curves)"
     )
 
