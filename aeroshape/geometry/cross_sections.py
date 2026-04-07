@@ -107,23 +107,31 @@ class CrossSectionProfile:
         py, pz = self.y.copy(), self.z.copy()
         x_off, y_off, z_off = position
         
+        from OCP.TColgp import TColgp_HArray1OfPnt
+        from OCP.TColStd import TColStd_HArray1OfReal
+        from OCP.GeomAPI import GeomAPI_Interpolate
+
         n = len(py)
-        arr = TColgp_Array1OfPnt(1, n)
+        arr = TColgp_HArray1OfPnt(1, n)
+        params = TColStd_HArray1OfReal(1, n)
         for i in range(n):
             arr.SetValue(i + 1, gp_Pnt(
                 float(x_off),
                 float(py[i]) + y_off,
                 float(pz[i]) + z_off,
             ))
+            # Force identical knots across morphing sections
+            params.SetValue(i + 1, i / (n - 1))
 
-        # B-spline approximation: degree 3–5, C2, tolerance 1e-3 mm.
-        # WARNING: Do not increase max_degree above 5 or decrease tolerance
-        # below 1e-3 — causes B-spline pole explosion in lofted surfaces.
-        bspline = GeomAPI_PointsToBSpline(arr, 3, 5, GeomAbs_C2, 1e-3)
-        if not bspline.IsDone():
-            bspline = GeomAPI_PointsToBSpline(arr)
+        # Exact parametric interpolation: completely eliminates OCC knot union
+        # pole explosion while passing exactly through the data points
+        interp = GeomAPI_Interpolate(arr, params, False, 1e-6)
+        interp.Perform()
+        
+        if not interp.IsDone():
+            raise RuntimeError("Failed to interpolate cross-section points")
 
-        edge = BRepBuilderAPI_MakeEdge(bspline.Curve()).Edge()
+        edge = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge()
         wire = BRepBuilderAPI_MakeWire(edge).Wire()
         return wire
 

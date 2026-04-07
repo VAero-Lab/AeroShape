@@ -18,17 +18,17 @@ class NurbsExporter:
     @staticmethod
     def to_step(shape, filepath, units="mm"):
         """Export to STEP format (AP242, preserves NURBS geometry).
-        
-        This method uses a high-performance direct transfer (up to 38x faster 
-        than XDE for complex assemblies) and suppresses verbose OCC 
-        transfer statistics for a cleaner CLI experience.
+
+        Uses STEPControl_Writer (direct transfer) which works reliably
+        for all shape types — solids, shells, compounds, and assemblies.
+        Suppresses verbose OCC transfer statistics for clean CLI output.
         """
         import os
         import sys
         from OCP.STEPControl import STEPControl_Writer, STEPControl_AsIs
         from OCP.Interface import Interface_Static
-        
-        # 1. Capture and Redirect C-level stdout to suppress transfer stats
+
+        # 1. Capture and redirect C-level stdout to suppress transfer stats
         fd = sys.stdout.fileno()
         old_stdout = os.dup(fd)
         devnull = os.open(os.devnull, os.O_WRONLY)
@@ -36,38 +36,23 @@ class NurbsExporter:
         os.close(devnull)
 
         try:
-            # 2. Optimization flags
-            Interface_Static.SetIVal_s("write.step.schema", 5) # AP242
+            # 2. Export configuration
+            Interface_Static.SetIVal_s("write.step.schema", 5)  # AP242
             Interface_Static.SetIVal_s("write.precision.mode", 0)
             Interface_Static.SetIVal_s("write.step.assembly", 1)
-            
+
             if units.lower() == "mm":
                 Interface_Static.SetCVal_s("write.step.unit", "MM")
             else:
                 Interface_Static.SetCVal_s("write.step.unit", "M")
 
             occ_shape = _unwrap_shape(shape)
-            
-            # 3. Create XDE Document for assembly-aware export
-            from OCP.TDocStd import TDocStd_Document
-            from OCP.XCAFApp import XCAFApp_Application
-            from OCP.XCAFDoc import XCAFDoc_ShapeTool
-            from OCP.STEPCAFControl import STEPCAFControl_Writer
-            from OCP.TCollection import TCollection_ExtendedString
-            
-            # Initialize XDE document
-            app = XCAFApp_Application.GetApplication_s()
-            doc = TDocStd_Document(TCollection_ExtendedString("AeroShape-STEP"))
-            app.NewDocument(TCollection_ExtendedString("BinXCAF"), doc)
-            shape_tool = XCAFDoc_ShapeTool.Set_s(doc.Main())
-            
-            # Transfer top-level compound correctly via XDE
-            shape_tool.AddShape(occ_shape, True, True) # make_assembly=True, check_closure=True
-            
-            writer = STEPCAFControl_Writer()
-            writer.Transfer(doc)
+
+            # 3. Direct transfer — works for solids, shells, and compounds
+            writer = STEPControl_Writer()
+            writer.Transfer(occ_shape, STEPControl_AsIs)
             status = writer.Write(str(filepath))
-            
+
             if status != 1:  # IFSelect_RetDone
                 raise RuntimeError(f"STEP export failed with status {status}")
 

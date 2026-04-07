@@ -345,28 +345,35 @@ class AirfoilProfile:
         px[-1], pz[-1] = px[0], pz[0]
 
         # Translate to position
+        from OCP.TColgp import TColgp_HArray1OfPnt
+        from OCP.TColStd import TColStd_HArray1OfReal
+        from OCP.GeomAPI import GeomAPI_Interpolate
+
         x_off, y_pos, z_off = position
         n = len(px)
-        arr = TColgp_Array1OfPnt(1, n)
+        arr = TColgp_HArray1OfPnt(1, n)
+        params = TColStd_HArray1OfReal(1, n)
+        
         for i in range(n):
             arr.SetValue(i + 1, gp_Pnt(
                 float(px[i]) + x_off,
                 float(y_pos),
                 float(pz[i]) + z_off,
             ))
+            # Force identical knots across any morphing airfoil shape
+            params.SetValue(i + 1, i / (n - 1))
 
-        # Fit B-spline curve through points.
-        # Degree 3–5, C2 continuity, 1e-3 mm tolerance.
-        # This produces ~45–51 poles regardless of data point count, keeping
-        # lofted surfaces compact for STEP export (~2–5 MB per wing).
-        # WARNING: Do not increase max_degree above 5 or decrease tolerance
-        # below 1e-3 — this causes B-spline pole explosion in lofted surfaces
-        # (e.g. degree 8 + tol 1e-4 → 105 poles/wire → 157K poles/face → 122 MB).
-        bspline = GeomAPI_PointsToBSpline(arr, 3, 5, GeomAbs_C2, 1e-3)
-        if not bspline.IsDone():
-            bspline = GeomAPI_PointsToBSpline(arr)
+        # Exact parametric interpolation: degree 3, C2 continuity natively.
+        # 0.00 mm deviation at points. By enforcing a unified parameter space,
+        # the OCC loft kernel sweeps morphing airfoils cleanly without 
+        # multiplying knot networks (pole explosion).
+        interp = GeomAPI_Interpolate(arr, params, False, 1e-6)
+        interp.Perform()
+        
+        if not interp.IsDone():
+            raise RuntimeError("Failed to interpolate airfoil points")
 
-        edge = BRepBuilderAPI_MakeEdge(bspline.Curve()).Edge()
+        edge = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge()
         
         # Explicitly make wire and ensure it is recognized as closed
         mk_wire = BRepBuilderAPI_MakeWire(edge)
