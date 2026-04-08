@@ -138,8 +138,18 @@ class MultiSegmentWing:
             # (shared with previous segment's tip).
             start = 0 if seg_idx == 0 else 1
 
+            from OCP.gp import gp_Vec
             sweep_rad = math.radians(seg.sweep_le_deg)
             dihedral_rad = math.radians(seg.dihedral_deg)
+
+            # Dynamic Frenet-Serret Basis for standard unguided segments
+            v_span = gp_Vec(math.tan(sweep_rad), 1.0, math.tan(dihedral_rad)).Normalized()
+            v_chord = gp_Vec(1, 0, 0)
+            v_thickness = v_chord.Crossed(v_span)
+            if v_thickness.Magnitude() > 1e-8:
+                v_thickness.Normalize()
+            else:
+                v_thickness = gp_Vec(0, 0, 1)
 
             # Compute t-values (parameter within segment [0, 1])
             if spanwise_clustering is not None:
@@ -168,6 +178,8 @@ class MultiSegmentWing:
                     "twist_deg": twist,
                     "chord": chord,
                     "airfoil": airfoil,
+                    "v_chord_dir": (v_chord.X(), v_chord.Y(), v_chord.Z()),
+                    "v_thickness_dir": (v_thickness.X(), v_thickness.Y(), v_thickness.Z())
                 })
 
             # Accumulate for next segment
@@ -224,6 +236,8 @@ class MultiSegmentWing:
                         position=(fr["x_offset"], fr["y"], fr["z_offset"]),
                         twist_deg=fr["twist_deg"],
                         local_chord=fr["chord"],
+                        v_chord_dir=fr.get("v_chord_dir"),
+                        v_thickness_dir=fr.get("v_thickness_dir")
                     )
                     wires.append(wire)
                 segments.append(NurbsSurfaceBuilder.loft(wires, solid=True))
@@ -280,6 +294,8 @@ class MultiSegmentWing:
                 position=(fr["x_offset"], fr["y"], fr["z_offset"]),
                 twist_deg=fr["twist_deg"],
                 local_chord=fr["chord"],
+                v_chord_dir=fr.get("v_chord_dir"),
+                v_thickness_dir=fr.get("v_thickness_dir")
             )
             wires.append(wire)
 
@@ -297,29 +313,22 @@ class MultiSegmentWing:
     # ── Guide-curve construction ──────────────────────────────────
 
     @classmethod
-    def from_planform_curves(cls, le_points, te_points, airfoil_stations,
+    def from_planform_curves(cls, le_curve, te_curve, airfoil_stations,
                              num_sections=30, name="wing", symmetric=True):
         """Build a wing from leading- and trailing-edge guide curves.
 
         Instead of defining segments, the user specifies the leading-edge
-        and trailing-edge shapes as ordered 3-D point lists.  Smooth
-        B-spline curves are fitted through each set of points and sampled
-        at ``num_sections`` stations.  At every station the chord is
-        derived from the LE/TE distance and the airfoil shape is
-        interpolated between the provided ``airfoil_stations``.
-
-        This produces smooth planform transitions (no kinks at segment
-        boundaries) and is especially useful for blended-wing-body
-        configurations.
+        and trailing-edge shapes using `GuideCurve` objects from `aeroshape.geometry.curves`.
+        These mathematically rigorous curves prevent approximation ringing artifacts.
 
         Parameters
         ----------
-        le_points : list of (float, float, float)
-            3-D points defining the leading-edge curve, ordered root to
-            tip.  Minimum 2 points.
-        te_points : list of (float, float, float)
-            3-D points defining the trailing-edge curve, ordered root to
-            tip.  Minimum 2 points.
+        le_curve : GuideCurve or list
+            A `GuideCurve` builder object evaluating the wing leading edge,
+            or a list of 3-D points (legacy behavior).
+        te_curve : GuideCurve or list
+            A `GuideCurve` builder object evaluating the wing trailing edge,
+            or a list of 3-D points (legacy behavior).
         airfoil_stations : list of (float, AirfoilProfile)
             Pairs of ``(spanwise_fraction, profile)`` where
             ``spanwise_fraction`` is in [0, 1] (0 = root, 1 = tip).
@@ -336,27 +345,64 @@ class MultiSegmentWing:
             A wing whose ``get_section_frames()`` returns the computed
             frames (no ``SegmentSpec`` objects are needed).
         """
-        le_curve = _fit_bspline_curve(le_points)
-        te_curve = _fit_bspline_curve(te_points)
+        from aeroshape.geometry.curves import GuideCurve
+        
+        if isinstance(le_curve, list):
+            le_builder = GuideCurve(start_point=le_curve[0])
+            le_builder.add_fitted_points(le_curve[1:])
+            le_occ = le_builder.build_occ_curve()
+        elif isinstance(le_curve, GuideCurve):
+            le_occ = le_curve.build_occ_curve()
+        else:
+            le_occ = le_curve
+
+        if isinstance(te_curve, list):
+            te_builder = GuideCurve(start_point=te_curve[0])
+            te_builder.add_fitted_points(te_curve[1:])
+            te_occ = te_builder.build_occ_curve()
+        elif isinstance(te_curve, GuideCurve):
+            te_occ = te_curve.build_occ_curve()
+        else:
+            te_occ = te_curve
+
+        le_curve = le_occ 
+        te_curve = te_occ 
 
         le_u0, le_u1 = le_curve.FirstParameter(), le_curve.LastParameter()
         te_u0, te_u1 = te_curve.FirstParameter(), te_curve.LastParameter()
 
         stations_sorted = sorted(airfoil_stations, key=lambda s: s[0])
 
+        from OCP.gp import gp_Pnt, gp_Vec
         frames = []
         for i in range(num_sections):
             t = i / (num_sections - 1) if num_sections > 1 else 0.0
 
-            le_pt = le_curve.Value(le_u0 + t * (le_u1 - le_u0))
+            le_pt = gp_Pnt()
+            le_vec = gp_Vec()
+            le_curve.D1(le_u0 + t * (le_u1 - le_u0), le_pt, le_vec)
+
             te_pt = te_curve.Value(te_u0 + t * (te_u1 - te_u0))
 
-            # Chord in XZ plane (exclude spanwise Y component)
+            # 3D spatial chord length
             dx = te_pt.X() - le_pt.X()
+            dy = te_pt.Y() - le_pt.Y()
             dz = te_pt.Z() - le_pt.Z()
-            chord = math.sqrt(dx * dx + dz * dz)
+            chord = math.sqrt(dx * dx + dy * dy + dz * dz)
+            
             if chord < 1e-8:
                 chord = 1e-8
+                v_chord = gp_Vec(1, 0, 0)
+            else:
+                v_chord = gp_Vec(dx, dy, dz)
+
+            # Frenet-Serret Moving Frame: 
+            # Thickness is strictly orthogonal to both the Chord and the Spanwise geometric curve
+            v_thickness = v_chord.Crossed(le_vec)
+            if v_thickness.Magnitude() > 1e-8:
+                v_thickness.Normalize()
+            else:
+                v_thickness = gp_Vec(0, 0, 1)
 
             airfoil = _interpolate_airfoil_at_fraction(
                 stations_sorted, t, chord
@@ -369,6 +415,8 @@ class MultiSegmentWing:
                 "twist_deg": 0.0,
                 "chord": chord,
                 "airfoil": airfoil,
+                "v_chord_dir": (v_chord.X(), v_chord.Y(), v_chord.Z()),
+                "v_thickness_dir": (v_thickness.X(), v_thickness.Y(), v_thickness.Z()),
             })
 
         wing = cls(name=name, symmetric=symmetric)
@@ -410,15 +458,16 @@ class MultiSegmentWing:
         p2_le = (p1_le[0] + 0.5, p1_le[1], p1_le[2] + height_z)
         p2_te = (p1_te[0] + 0.5 - chord0*(1.0-tip_chord_ratio), p1_te[1], p1_te[2] + height_z)
         
-        from aeroshape.nurbs.utils import bezier_quadratic
-        le_pts, te_pts = [], []
-        for i in range(num_sections):
-            t = i / float(num_sections - 1)
-            le_pts.append(bezier_quadratic(t, le0, p1_le, p2_le))
-            te_pts.append(bezier_quadratic(t, te0, p1_te, p2_te))
+        from aeroshape.geometry.curves import GuideCurve
+
+        le = GuideCurve(start_point=le0)
+        le.add_bezier([p1_le, p2_le])
+
+        te = GuideCurve(start_point=te0)
+        te.add_bezier([p1_te, p2_te])
 
         winglet = cls.from_planform_curves(
-            le_points=le_pts, te_points=te_pts,
+            le_curve=le, te_curve=te,
             airfoil_stations=[(0.0, last["airfoil"]), (1.0, last["airfoil"])],
             num_sections=num_sections, name=name
         )
@@ -467,28 +516,20 @@ class MultiSegmentWing:
         p2_te = (p1_te[0] + 0.3*(p4_te[0]-p1_te[0]), flat_y, p1_te[2] + 0.3*(p4_te[2]-p1_te[2]))
         p3_te = (p1_te[0] + 0.7*(p4_te[0]-p1_te[0]), flat_y, p1_te[2] + 0.7*(p4_te[2]-p1_te[2]))
         
-        from aeroshape.nurbs.utils import bezier_quadratic
-        le_pts, te_pts = [], []
-        num_c = max(5, int(num_sections * 0.4))
-        num_s = max(5, int(num_sections * 0.2))
-        
-        for i in range(num_c):
-            t = i / float(num_c)
-            le_pts.append(bezier_quadratic(t, le0, p1_le, p2_le))
-            te_pts.append(bezier_quadratic(t, te0, p1_te, p2_te))
-            
-        for i in range(num_s):
-            t = i / float(num_s)
-            le_pts.append((p2_le[0] + t*(p3_le[0]-p2_le[0]), flat_y, p2_le[2] + t*(p3_le[2]-p2_le[2])))
-            te_pts.append((p2_te[0] + t*(p3_te[0]-p2_te[0]), flat_y, p2_te[2] + t*(p3_te[2]-p2_te[2])))
-            
-        for i in range(num_c):
-            t = i / float(num_c - 1)
-            le_pts.append(bezier_quadratic(t, p3_le, p4_le, le5))
-            te_pts.append(bezier_quadratic(t, p3_te, p4_te, te5))
-            
+        from aeroshape.geometry.curves import GuideCurve
+
+        le = GuideCurve(start_point=le0)
+        le.add_bezier([p1_le, p2_le])
+        le.add_line(end_point=p3_le)
+        le.add_bezier([p4_le, le5])
+
+        te = GuideCurve(start_point=te0)
+        te.add_bezier([p1_te, p2_te])
+        te.add_line(end_point=p3_te)
+        te.add_bezier([p4_te, te5])
+
         fin = cls.from_planform_curves(
-            le_points=le_pts, te_points=te_pts,
+            le_curve=le, te_curve=te,
             airfoil_stations=[(0.0, lower_last["airfoil"]), (1.0, upper_last["airfoil"])],
             num_sections=num_sections, name=name
         )
