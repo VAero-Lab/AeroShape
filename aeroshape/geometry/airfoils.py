@@ -66,13 +66,13 @@ class NACAProfileGenerator:
         beta = np.linspace(0.0, math.pi, num_points)
         xc = 0.5 * (1.0 - np.cos(beta))
 
-        # Thickness distribution (standard NACA formula)
+        # Thickness distribution (closed trailing edge modification)
         yt = 5.0 * t * (
             0.2969 * np.sqrt(xc)
             - 0.1260 * xc
             - 0.3516 * xc**2
             + 0.2843 * xc**3
-            - 0.1015 * xc**4
+            - 0.1036 * xc**4
         )
 
         # Camber line and its derivative
@@ -153,13 +153,13 @@ class AirfoilProfile:
         beta = np.linspace(0, np.pi, num_points)
         xc = 0.5 * (1.0 - np.cos(beta))
 
-        # Thickness distribution (same as 4-digit)
+        # Thickness distribution (closed trailing edge modification)
         yt = 5.0 * t_max * (
             0.2969 * np.sqrt(xc)
             - 0.1260 * xc
             - 0.3516 * xc**2
             + 0.2843 * xc**3
-            - 0.1015 * xc**4
+            - 0.1036 * xc**4
         )
 
         # 5-digit mean camber line coefficients
@@ -291,37 +291,26 @@ class AirfoilProfile:
     # ── OCC conversion ────────────────────────────────────────────
 
     def to_occ_wire(self, position=(0.0, 0.0, 0.0), twist_deg=0.0,
-                    local_chord=None):
-        """Convert to a pythonocc TopoDS_Wire at a 3D position.
-
-        The profile is placed in the XZ plane, centered at the leading
-        edge, then twisted about the LE, scaled to local_chord, and
-        translated to position.
+                    local_chord=None, v_chord_dir=None, v_thickness_dir=None):
+        """Convert to a pythonocc TopoDS_Wire at a dynamically oriented 3D position.
 
         Parameters
         ----------
         position : tuple
-            (x_offset, y_position, z_offset) in meters.
+            (x, y, z) global offset.
         twist_deg : float
-            Twist angle about the leading edge (degrees).
-        local_chord : float or None
-            If given, scale the profile to this chord before placing.
-
-        Returns
-        -------
-        TopoDS_Wire
-            Closed B-spline wire suitable for lofting.
+            Twist angle around the LE.
+        local_chord : float
+            Scale factor.
+        v_chord_dir : tuple
+            Vector explicitly defining the chordwise (X-mapped) spatial direction.
+        v_thickness_dir : tuple
+            Vector explicitly defining the thickness (Z-mapped) spatial direction.
         """
-        from OCP.gp import gp_Pnt
+        from OCP.gp import gp_Pnt, gp_Vec
         from OCP.GeomAPI import GeomAPI_PointsToBSpline
         from OCP.GeomAbs import GeomAbs_C2
         from OCP.TColgp import TColgp_Array1OfPnt
-        from OCP.BRepBuilderAPI import (
-            BRepBuilderAPI_MakeEdge,
-            BRepBuilderAPI_MakeWire,
-        )
-
-        # Scale to local chord if needed
         if local_chord is not None and abs(local_chord - self.chord) > 1e-10:
             profile = self.scaled(local_chord)
         else:
@@ -344,29 +333,39 @@ class AirfoilProfile:
         # Force the last point to be exactly the same as the first point
         px[-1], pz[-1] = px[0], pz[0]
 
-        # Translate to position
+        from OCP.gp import gp_Pnt, gp_Vec
+        from OCP.GeomAPI import GeomAPI_Interpolate
         from OCP.TColgp import TColgp_HArray1OfPnt
         from OCP.TColStd import TColStd_HArray1OfReal
-        from OCP.GeomAPI import GeomAPI_Interpolate
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeEdge, BRepBuilderAPI_MakeWire
 
-        x_off, y_pos, z_off = position
+        if v_chord_dir is None:
+            v_x = gp_Vec(1, 0, 0)
+        else:
+            v_x = gp_Vec(*v_chord_dir).Normalized()
+            
+        if v_thickness_dir is None:
+            v_z = gp_Vec(0, 0, 1)
+        else:
+            v_z = gp_Vec(*v_thickness_dir).Normalized()
+
+        p_root = gp_Pnt(*position)
         n = len(px)
         arr = TColgp_HArray1OfPnt(1, n)
         params = TColStd_HArray1OfReal(1, n)
         
         for i in range(n):
-            arr.SetValue(i + 1, gp_Pnt(
-                float(px[i]) + x_off,
-                float(y_pos),
-                float(pz[i]) + z_off,
-            ))
+            # Dynamic 3D mapping combining scale, position, and arbitrary 3-axis roll
+            p = gp_Pnt(
+                p_root.X() + float(px[i]) * v_x.X() + float(pz[i]) * v_z.X(),
+                p_root.Y() + float(px[i]) * v_x.Y() + float(pz[i]) * v_z.Y(),
+                p_root.Z() + float(px[i]) * v_x.Z() + float(pz[i]) * v_z.Z()
+            )
+            arr.SetValue(i + 1, p)
             # Force identical knots across any morphing airfoil shape
             params.SetValue(i + 1, i / (n - 1))
 
         # Exact parametric interpolation: degree 3, C2 continuity natively.
-        # 0.00 mm deviation at points. By enforcing a unified parameter space,
-        # the OCC loft kernel sweeps morphing airfoils cleanly without 
-        # multiplying knot networks (pole explosion).
         interp = GeomAPI_Interpolate(arr, params, False, 1e-6)
         interp.Perform()
         
@@ -374,14 +373,11 @@ class AirfoilProfile:
             raise RuntimeError("Failed to interpolate airfoil points")
 
         edge = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge()
-        
-        # Explicitly make wire and ensure it is recognized as closed
         mk_wire = BRepBuilderAPI_MakeWire(edge)
         if not mk_wire.IsDone():
              raise RuntimeError("Failed to create airfoil wire from B-spline edge")
              
-        wire = mk_wire.Wire()
-        return wire
+        return mk_wire.Wire()
 
 
 # ═══════════════════════════════════════════════════════════════════
