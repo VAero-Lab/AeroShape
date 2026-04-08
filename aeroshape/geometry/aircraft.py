@@ -226,7 +226,7 @@ class AircraftModel:
         method = method.lower()
         if method == "occ":
             if uproc:
-                return self._compute_properties_occ_parallel(density, tolerance)
+                return self._compute_properties_occ_parallel(density, tolerance, spanwise_clustering=spanwise_clustering)
             else:
                 from aeroshape.nurbs.utils import occ_mass_properties
                 shape = self.to_occ_shape(fuse=False)
@@ -284,7 +284,7 @@ class AircraftModel:
             "inertia": final_i,
         }
 
-    def _compute_properties_occ_parallel(self, density, tolerance):
+    def _compute_properties_occ_parallel(self, density, tolerance, spanwise_clustering=None):
         """Compute OCC properties by distributing individual segments to a process pool."""
         import multiprocessing as mp
         import numpy as np
@@ -305,11 +305,11 @@ class AircraftModel:
                 
             # Add starboard segments
             for i in range(num_tasks):
-                tasks.append(('wing_seg', wing, i, origin, False))
+                tasks.append(('wing_seg', wing, i, origin, False, spanwise_clustering))
             # Add port segments if symmetric
             if wing.symmetric:
                 for i in range(num_tasks):
-                    tasks.append(('wing_seg', wing, i, origin, True))
+                    tasks.append(('wing_seg', wing, i, origin, True, spanwise_clustering))
 
         # Fuselages
         for entry in self.fuselages:
@@ -322,7 +322,7 @@ class AircraftModel:
                 num_tasks = math.ceil((n_total - 1) / (15 - 1))
                 
             for i in range(num_tasks):
-                tasks.append(('fuse_seg', fuse, i, origin, False))
+                tasks.append(('fuse_seg', fuse, i, origin, False, spanwise_clustering))
 
         if not tasks:
             return {"volume": 0.0, "mass": 0.0, "cg": np.zeros(3), "inertia": (0,0,0,0,0,0)}
@@ -400,12 +400,15 @@ def _worker_compute_segment_props(task, density, tolerance):
     from OCP.GProp import GProp_GProps
     from OCP.BRepGProp import BRepGProp
     
-    comp_type, definition, seg_idx, origin, is_mirrored = task
+    comp_type, definition, seg_idx, origin, is_mirrored, spanwise_clustering = task
     ox, oy, oz = origin
     
     # 1. Build segment shape
-    # We use to_occ_segments which we just implemented
-    segs = definition.to_occ_segments()
+    if comp_type == 'wing_seg':
+        segs = definition.to_occ_segments(spanwise_clustering=spanwise_clustering)
+    else:
+        segs = definition.to_occ_segments() # Fuselage does not support clustering directly right now
+        
     if seg_idx >= len(segs):
          return {"volume": 0.0, "mass": 0.0, "center_of_mass": (0,0,0), "inertia_matrix": np.zeros((3,3))}
          

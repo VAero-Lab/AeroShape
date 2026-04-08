@@ -134,7 +134,7 @@ def half_cosine_end(n):
 
 # ── Parameterized distribution laws (factory functions) ──────────
 
-def tanh_one_sided(beta=1.5):
+class tanh_one_sided:
     """One-sided hyperbolic-tangent clustering (Roberts transformation).
 
     Concentrates points near the start (t = 0).  Larger *beta* gives
@@ -154,15 +154,17 @@ def tanh_one_sided(beta=1.5):
     callable
         Function ``f(n) -> np.ndarray``.
     """
-    def _fn(n):
+    def __init__(self, beta=1.5):
+        self.beta = beta
+
+    def __call__(self, n):
         if n < 2:
             return np.array([0.0])
         eta = np.linspace(0.0, 1.0, n)
-        return 1.0 - np.tanh(beta * (1.0 - eta)) / np.tanh(beta)
-    return _fn
+        return 1.0 - np.tanh(self.beta * (1.0 - eta)) / np.tanh(self.beta)
 
 
-def tanh_two_sided(beta=1.5):
+class tanh_two_sided:
     """Two-sided hyperbolic-tangent clustering.
 
     Concentrates points near both ends (t = 0 and t = 1).  Useful
@@ -180,16 +182,18 @@ def tanh_two_sided(beta=1.5):
     callable
         Function ``f(n) -> np.ndarray``.
     """
-    def _fn(n):
+    def __init__(self, beta=1.5):
+        self.beta = beta
+
+    def __call__(self, n):
         if n < 2:
             return np.array([0.0])
         eta = np.linspace(0.0, 1.0, n)
-        return 0.5 * (1.0 + np.tanh(beta * (2.0 * eta - 1.0))
-                       / np.tanh(beta))
-    return _fn
+        return 0.5 * (1.0 + np.tanh(self.beta * (2.0 * eta - 1.0))
+                       / np.tanh(self.beta))
 
 
-def exponential(ratio=1.2):
+class exponential:
     """Geometric (exponential) growth distribution.
 
     Each successive interval is *ratio* times the previous one.
@@ -208,15 +212,18 @@ def exponential(ratio=1.2):
     callable
         Function ``f(n) -> np.ndarray``.
     """
-    def _fn(n):
+    def __init__(self, ratio=1.2):
+        self.ratio = ratio
+
+    def __call__(self, n):
         if n < 2:
             return np.array([0.0])
-        if abs(ratio - 1.0) < 1e-10:
+        if abs(self.ratio - 1.0) < 1e-10:
             return np.linspace(0.0, 1.0, n)
 
         # Geometric series: ds_i = ds_0 * ratio^i
         # Total = ds_0 * (ratio^(n-1) - 1) / (ratio - 1) = 1
-        r = float(ratio)
+        r = float(self.ratio)
         k = n - 1
         ds0 = (r - 1.0) / (r ** k - 1.0)
         t = np.zeros(n)
@@ -224,10 +231,9 @@ def exponential(ratio=1.2):
             t[i] = t[i - 1] + ds0 * r ** (i - 1)
         t[-1] = 1.0  # enforce exact endpoint
         return t
-    return _fn
 
 
-def vinokur(ds_start=0.01, ds_end=0.01):
+class vinokur:
     """Vinokur two-sided stretching function.
 
     Specifies the first and last cell sizes (as fractions of the total
@@ -251,12 +257,16 @@ def vinokur(ds_start=0.01, ds_end=0.01):
     ---------
     Vinokur, M., J. Comput. Phys. 50 (1983), pp. 215–234.
     """
-    def _fn(n):
+    def __init__(self, ds_start=0.01, ds_end=0.01):
+        self.ds_start = ds_start
+        self.ds_end = ds_end
+
+    def __call__(self, n):
         if n < 2:
             return np.array([0.0])
 
         n1 = n - 1
-        S = 1.0 / (n1 * np.sqrt(ds_start * ds_end))
+        S = 1.0 / (n1 * np.sqrt(self.ds_start * self.ds_end))
 
         if S <= 1.0 + 1e-10:
             return np.linspace(0.0, 1.0, n)
@@ -277,15 +287,15 @@ def vinokur(ds_start=0.01, ds_end=0.01):
 
         u = np.linspace(0.0, 1.0, n)
 
-        if abs(ds_start - ds_end) < 1e-10:
+        if abs(self.ds_start - self.ds_end) < 1e-10:
             # Symmetric: tanh two-sided with computed delta
             t = 0.5 * (1.0 + np.tanh(delta * (u - 0.5))
                         / np.tanh(0.5 * delta))
         else:
             # Asymmetric: blend two one-sided tanh distributions.
             # Solve for individual stretching params via Newton.
-            beta_s = _solve_one_sided_beta(n1, ds_start)
-            beta_e = _solve_one_sided_beta(n1, ds_end)
+            beta_s = _solve_one_sided_beta(n1, self.ds_start)
+            beta_e = _solve_one_sided_beta(n1, self.ds_end)
             # Forward (dense at start), backward (dense at end)
             t_fwd = np.tanh(beta_s * u) / np.tanh(beta_s)
             t_bwd = 1.0 - np.tanh(beta_e * (1.0 - u)) / np.tanh(beta_e)
@@ -295,7 +305,6 @@ def vinokur(ds_start=0.01, ds_end=0.01):
         t[0] = 0.0
         t[-1] = 1.0
         return t
-    return _fn
 
 
 # ── Internal helpers ─────────────────────────────────────────────

@@ -74,12 +74,14 @@ def create_box_wings() -> list:
     loc_lower = (16.0, 0.0, -5)
     loc_upper = (24.0, 0.0, 2)
     
+    from aeroshape.analysis.clustering import cosine
+    
     # 3. Piecewise Composite Fin 
     # Generates a structurally flawless G1 continuous connecting flat winglet parametrically referencing origin bounds!
     fin = MultiSegmentWing.create_box_fin(
         lower_wing=lower, upper_wing=upper,
         lower_origin=loc_lower, upper_origin=loc_upper,
-        d_out=3.0, num_sections=25, name="Composite Box Fin"
+        d_out=3.0, num_sections=30, spanwise_clustering=cosine, name="Composite Box Fin"
     )
 
     return [
@@ -98,7 +100,8 @@ def main():
     end = time.time()
     print(f"Time to create aircraft: {end - now:.2f} seconds")
     
-    props = ac.compute_properties(method="occ", density=2000.0, uproc=True, tolerance=0.1) 
+    from aeroshape.analysis.clustering import cosine
+    props = ac.compute_properties(method="occ", density=2000.0, uproc=True, tolerance=0.1, spanwise_clustering=cosine) 
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
     end1 = time.time()

@@ -203,7 +203,7 @@ class MultiSegmentWing:
         from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
         return NurbsSurfaceBuilder.build(self)
 
-    def to_occ_segments(self, max_sections=15):
+    def to_occ_segments(self, max_sections=15, spanwise_clustering=None):
         """Build individual NURBS lofts for cada segment, splitting large ones.
 
         Returns
@@ -213,7 +213,7 @@ class MultiSegmentWing:
         """
         from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
         
-        frames = self.get_section_frames()
+        frames = self.get_section_frames(spanwise_clustering=spanwise_clustering)
         if len(frames) < 2:
             return []
             
@@ -237,7 +237,8 @@ class MultiSegmentWing:
                         twist_deg=fr["twist_deg"],
                         local_chord=fr["chord"],
                         v_chord_dir=fr.get("v_chord_dir"),
-                        v_thickness_dir=fr.get("v_thickness_dir")
+                        v_thickness_dir=fr.get("v_thickness_dir"),
+                        two_edges=True
                     )
                     wires.append(wire)
                 segments.append(NurbsSurfaceBuilder.loft(wires, solid=True))
@@ -314,7 +315,8 @@ class MultiSegmentWing:
 
     @classmethod
     def from_planform_curves(cls, le_curve, te_curve, airfoil_stations,
-                             num_sections=30, name="wing", symmetric=True):
+                             num_sections=30, spanwise_clustering=None,
+                             name="wing", symmetric=True):
         """Build a wing from leading- and trailing-edge guide curves.
 
         Instead of defining segments, the user specifies the leading-edge
@@ -338,6 +340,9 @@ class MultiSegmentWing:
             Wing name.
         symmetric : bool
             If True, only starboard half is provided and will be mirrored.
+        spanwise_clustering : callable or None
+            Distribution law for spanwise section spacing along the Guide Curves.
+            Example: `aeroshape.analysis.clustering.tanh_two_sided()`.
 
         Returns
         -------
@@ -374,9 +379,16 @@ class MultiSegmentWing:
         stations_sorted = sorted(airfoil_stations, key=lambda s: s[0])
 
         from OCP.gp import gp_Pnt, gp_Vec
+        import numpy as np
+        
+        if spanwise_clustering is not None:
+            t_vals = spanwise_clustering(num_sections)
+        else:
+            t_vals = np.linspace(0.0, 1.0, num_sections) if num_sections > 1 else [0.0]
+
         frames = []
         for i in range(num_sections):
-            t = i / (num_sections - 1) if num_sections > 1 else 0.0
+            t = float(t_vals[i])
 
             le_pt = gp_Pnt()
             le_vec = gp_Vec()
@@ -429,6 +441,7 @@ class MultiSegmentWing:
                                sweep_out_y: float = 0.5,
                                tip_chord_ratio: float = 0.5,
                                num_sections: int = 25,
+                               spanwise_clustering=None,
                                name: str = "Blended Winglet"):
         """Create a G1 continuous winglet attaching precisely to the tip of an existing wing.
         
@@ -469,7 +482,7 @@ class MultiSegmentWing:
         winglet = cls.from_planform_curves(
             le_curve=le, te_curve=te,
             airfoil_stations=[(0.0, last["airfoil"]), (1.0, last["airfoil"])],
-            num_sections=num_sections, name=name
+            num_sections=num_sections, spanwise_clustering=spanwise_clustering, name=name
         )
         winglet.symmetric = base_wing.symmetric
         return winglet
@@ -480,6 +493,7 @@ class MultiSegmentWing:
                        upper_origin: tuple = (0.0, 0.0, 0.0),
                        d_out: float = 3.0,
                        num_sections: int = 40,
+                       spanwise_clustering=None,
                        name: str = "Box Wing Fin"):
         """Create a continuous flat-walled bounding box pillar securely marrying two wing topology boundaries.
         
@@ -531,7 +545,7 @@ class MultiSegmentWing:
         fin = cls.from_planform_curves(
             le_curve=le, te_curve=te,
             airfoil_stations=[(0.0, lower_last["airfoil"]), (1.0, upper_last["airfoil"])],
-            num_sections=num_sections, name=name
+            num_sections=num_sections, spanwise_clustering=spanwise_clustering, name=name
         )
         fin.symmetric = lower_wing.symmetric
         return fin

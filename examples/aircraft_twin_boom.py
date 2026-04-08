@@ -93,7 +93,8 @@ def main():
 
     # Compute high-fidelity mass properties in parallel with non-adaptive integration
     start_time1 = time.time()
-    props = ac.compute_properties(method='occ', density=2700.0, uproc=True, tolerance=0.1) 
+    from aeroshape.analysis.clustering import tanh_one_sided
+    props = ac.compute_properties(method='occ', density=2700.0, uproc=True, tolerance=0.1, spanwise_clustering=tanh_one_sided(2.0)) 
     end_time1 = time.time()
     print(f"Time to compute properties: {end_time1 - start_time1:.2f} seconds")
     print(f"Volume: {props['volume']:.2f} m^3")

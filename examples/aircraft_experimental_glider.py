@@ -81,7 +81,8 @@ def main():
 
     start_time2 = time.time()
     # Compute high-fidelity mass properties in parallel with non-adaptive integration   
-    props = ac.compute_properties(method='occ', density=300.0, uproc=True, tolerance=0.1)
+    from aeroshape.analysis.clustering import half_cosine_end
+    props = ac.compute_properties(method='occ', density=300.0, uproc=True, tolerance=0.1, spanwise_clustering=half_cosine_end)
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
     end_time2 = time.time()

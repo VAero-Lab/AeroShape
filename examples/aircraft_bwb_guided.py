@@ -90,11 +90,14 @@ def main():
     ]
 
     # ── Build wing from guide curves ─────────────────────────────
+    from aeroshape.analysis.clustering import tanh_two_sided
+    
     bwb = MultiSegmentWing.from_planform_curves(
         le_curve=le,
         te_curve=te,
         airfoil_stations=airfoil_stations,
         num_sections=40,        # high-res guided loft
+        spanwise_clustering=tanh_two_sided(1.5), # Concentrate loft evaluations near root and tip
         name="BWB (Guide Curves)"
     )
 

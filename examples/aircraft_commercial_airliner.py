@@ -67,12 +67,15 @@ def create_wings() -> list:
     
     # 3. Dynamic Winglet Factory
     # The G1 analytic explicit bridge natively bounds to the host `main_wing` local frames!
+    from aeroshape.analysis.clustering import tanh_two_sided
+
     winglet = MultiSegmentWing.create_blended_winglet(
         base_wing=main_wing,
         height_z=2.0,
         sweep_out_y=0.5,
         tip_chord_ratio=0.4,
         num_sections=25,
+        spanwise_clustering=tanh_two_sided(1.5),
         name="Smooth Blended Winglet"
     )
     # Winglet intrinsically mirrors the outer boundary tangency completely relative to the host's root origin.
@@ -104,7 +107,8 @@ def main():
 
     start_time2 = time.time()
     # Compute high-fidelity mass properties in parallel with non-adaptive integration
-    props = ac.compute_properties(method='occ', density=3000.0, uproc=True, tolerance=0.1)
+    from aeroshape.analysis.clustering import tanh_two_sided
+    props = ac.compute_properties(method='occ', density=3000.0, uproc=True, tolerance=0.1, spanwise_clustering=tanh_two_sided(1.5))
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
     end_time2 = time.time()

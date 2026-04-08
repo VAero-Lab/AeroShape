@@ -94,7 +94,8 @@ def main():
     end_time = time.time()
     print(f"Time to create aircraft: {end_time - start_time:.2f} seconds")
     
-    props = ac.compute_properties(method='occ', density=1200.0, uproc=True, tolerance=0.1) 
+    from aeroshape.analysis.clustering import vinokur
+    props = ac.compute_properties(method='occ', density=1200.0, uproc=True, tolerance=0.1, spanwise_clustering=vinokur(1.2, 1.2)) 
     print(f"Volume: {props['volume']:.2f} m^3")
     print(f"Mass:   {props['mass']:.1f} kg")
     end_time1 = time.time()

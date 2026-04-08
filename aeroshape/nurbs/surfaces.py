@@ -48,7 +48,8 @@ class NurbsSurfaceBuilder:
                 twist_deg=fr["twist_deg"],
                 local_chord=fr["chord"],
                 v_chord_dir=fr.get("v_chord_dir"),
-                v_thickness_dir=fr.get("v_thickness_dir")
+                v_thickness_dir=fr.get("v_thickness_dir"),
+                two_edges=True
             )
             wires.append(Wire(occ_wire))
 

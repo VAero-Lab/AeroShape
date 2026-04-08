@@ -62,9 +62,9 @@ class NACAProfileGenerator:
         p = int(naca_code[1]) / 10.0    # Position of maximum camber
         t = int(naca_code[2:]) / 100.0  # Maximum thickness
 
-        # Cosine spacing for better LE/TE resolution (Fig. 2c)
-        beta = np.linspace(0.0, math.pi, num_points)
-        xc = 0.5 * (1.0 - np.cos(beta))
+        from aeroshape.analysis.clustering import cosine
+        # Default to full-cosine spacing for better LE/TE resolution
+        xc = cosine(num_points)
 
         # Thickness distribution (closed trailing edge modification)
         yt = 5.0 * t * (
@@ -291,7 +291,8 @@ class AirfoilProfile:
     # ── OCC conversion ────────────────────────────────────────────
 
     def to_occ_wire(self, position=(0.0, 0.0, 0.0), twist_deg=0.0,
-                    local_chord=None, v_chord_dir=None, v_thickness_dir=None):
+                    local_chord=None, v_chord_dir=None, v_thickness_dir=None,
+                    two_edges=False):
         """Convert to a pythonocc TopoDS_Wire at a dynamically oriented 3D position.
 
         Parameters
@@ -351,31 +352,49 @@ class AirfoilProfile:
 
         p_root = gp_Pnt(*position)
         n = len(px)
-        arr = TColgp_HArray1OfPnt(1, n)
-        params = TColStd_HArray1OfReal(1, n)
         
+        # Helper to build a spline edge from a subset of points
+        def _build_spline_edge(pts, indices):
+            num = len(pts)
+            arr_local = TColgp_HArray1OfPnt(1, num)
+            params_local = TColStd_HArray1OfReal(1, num)
+            for j, p in enumerate(pts):
+                arr_local.SetValue(j + 1, p)
+                params_local.SetValue(j + 1, indices[j] / (n - 1))
+            interp_local = GeomAPI_Interpolate(arr_local, params_local, False, 1e-6)
+            interp_local.Perform()
+            if not interp_local.IsDone():
+                raise RuntimeError("Failed to interpolate airfoil partition")
+            return BRepBuilderAPI_MakeEdge(interp_local.Curve()).Edge()
+
+        pts = []
         for i in range(n):
-            # Dynamic 3D mapping combining scale, position, and arbitrary 3-axis roll
             p = gp_Pnt(
                 p_root.X() + float(px[i]) * v_x.X() + float(pz[i]) * v_z.X(),
                 p_root.Y() + float(px[i]) * v_x.Y() + float(pz[i]) * v_z.Y(),
                 p_root.Z() + float(px[i]) * v_x.Z() + float(pz[i]) * v_z.Z()
             )
-            arr.SetValue(i + 1, p)
-            # Force identical knots across any morphing airfoil shape
-            params.SetValue(i + 1, i / (n - 1))
+            pts.append(p)
 
-        # Exact parametric interpolation: degree 3, C2 continuity natively.
-        interp = GeomAPI_Interpolate(arr, params, False, 1e-6)
-        interp.Perform()
+        mk_wire = BRepBuilderAPI_MakeWire()
         
-        if not interp.IsDone():
-            raise RuntimeError("Failed to interpolate airfoil points")
-
-        edge = BRepBuilderAPI_MakeEdge(interp.Curve()).Edge()
-        mk_wire = BRepBuilderAPI_MakeWire(edge)
-        if not mk_wire.IsDone():
-             raise RuntimeError("Failed to create airfoil wire from B-spline edge")
+        if two_edges:
+            # Explicit structural decomposition into Lower and Upper edges
+            # Solves OCC tessellation 'fat ribbon' errors at the C0 trailing edge cusp
+            le_idx = int(np.argmin(px))
+            edge_lower = _build_spline_edge(pts[:le_idx + 1], list(range(le_idx + 1)))
+            edge_upper = _build_spline_edge(pts[le_idx:], list(range(le_idx, n)))
+            mk_wire.Add(edge_lower)
+            mk_wire.Add(edge_upper)
+            if not mk_wire.IsDone():
+                raise RuntimeError("Failed to explicitly seal Upper and Lower C0 B-spline contours")
+        else:
+            # Single contiguous B-spline mapping
+            # Required for PyVista parametric sampling grids `sample_shape_grid`
+            edge_single = _build_spline_edge(pts, list(range(n)))
+            mk_wire.Add(edge_single)
+            if not mk_wire.IsDone():
+                raise RuntimeError("Failed to create unified airfoil wire from B-spline")
              
         return mk_wire.Wire()
 
