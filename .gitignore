@@ -11,3 +11,5 @@ venv/
 env/
 Exports/
 .streamlit/
+.pytest_cache/
+tmp_debug*.py

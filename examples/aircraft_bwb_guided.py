@@ -30,8 +30,7 @@ from aeroshape.nurbs.export import NurbsExporter
 EXPORT_DIR = "Exports"
 
 
-def main():
-    start_time = time.time()
+def create_bwb_wing():
     # ── Airfoil profiles at key spanwise stations ────────────────
     # Center body: very thick symmetric (cabin volume)
     center = AirfoilProfile.from_naca4("0020", num_points=40)
@@ -100,6 +99,12 @@ def main():
         spanwise_clustering=tanh_two_sided(1.5), # Concentrate loft evaluations near root and tip
         name="BWB (Guide Curves)"
     )
+    return bwb
+
+def main():
+    start_time = time.time()
+    
+    bwb = create_bwb_wing()
 
     # ── Aircraft Assembly & Analysis ─────────────────────────────
     # By using AircraftModel, symmetry is handled automatically
@@ -128,11 +133,16 @@ def main():
     start_time2 = time.time()
     # ── NURBS export ─────────────────────────────────────────────
     os.makedirs(EXPORT_DIR, exist_ok=True)
-    # We can use the same model.to_occ_shape() for export
-    shape = model.to_occ_shape()
-    step_path = os.path.join(EXPORT_DIR, "blended_wing_body_guided.step")
-    NurbsExporter.to_step(shape, step_path)
-    print(f"\n  STEP exported: {step_path}")
+    if "--oml" in sys.argv:
+        oml_path = os.path.join(EXPORT_DIR, "blended_wing_body_guided_oml.step")
+        model.export_oml(oml_path)
+        print(f"\n  STEP exported: {oml_path}")
+    else:
+        # We can use the same model.to_occ_shape() for export
+        shape = model.to_occ_shape()
+        step_path = os.path.join(EXPORT_DIR, "blended_wing_body_guided.step")
+        NurbsExporter.to_step(shape, step_path)
+        print(f"\n  STEP exported: {step_path}")
     end_time2 = time.time()
     print(f"Time to export: {end_time2 - start_time2:.2f} seconds")
     

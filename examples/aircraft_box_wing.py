@@ -109,11 +109,17 @@ def main():
 
     os.makedirs("Exports", exist_ok=True)
     from aeroshape.nurbs.export import NurbsExporter
-    export_path = "Exports/aircraft_box_wing.step"
-    NurbsExporter.to_step(ac.to_occ_shape(fuse=False), export_path)
+    if "--oml" in sys.argv:
+        oml_path = "Exports/aircraft_box_wing_oml.step"
+        ac.export_oml(oml_path)
+        print(f"Exported watertight OML to {oml_path}")
+    else:
+        export_path = "Exports/aircraft_box_wing.step"
+        NurbsExporter.to_step(ac.to_occ_shape(fuse=False), export_path)
+        print(f"Exported Multi-body Assembly to {export_path}")
+        
     end2 = time.time()
     print(f"Time to export: {end2 - end1:.2f} seconds")
-    print(f"Exported Assembly to {export_path}")
 
     if "--no-show" not in sys.argv:
         ac.show()

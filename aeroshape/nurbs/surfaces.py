@@ -11,7 +11,7 @@ import math
 import numpy as np
 from build123d import (
     Wire, Face, Solid, Shell, Compound, Shape, Vector,
-    extrude, sweep
+    extrude, sweep, loft
 )
 
 
@@ -140,8 +140,8 @@ class NurbsSurfaceBuilder:
         return loft(section_wires, solid=solid)
 
     @staticmethod
-    def fuse_shapes(shapes):
-        """Boolean fuse a list of shapes into one solid.
+    def generate_oml(shapes):
+        """Boolean fuse a list of shapes into a single watertight OML solid natively.
 
         Parameters
         ----------
@@ -149,22 +149,29 @@ class NurbsSurfaceBuilder:
 
         Returns
         -------
-        Shape
+        Solid
         """
         if not shapes:
             return None
-        # Ensure all shapes are build123d Shape objects
-        processed_shapes = []
+            
+        processed_solids = []
         for s in shapes:
             if not hasattr(s, "wrapped"):
-                processed_shapes.append(Shape(s))
+                processed_solids.append(Solid(s))
             else:
-                processed_shapes.append(s)
+                # Typecast to assure solid union math
+                if isinstance(s, Solid):
+                    processed_solids.append(s)
+                else:
+                    processed_solids.append(Solid(s.wrapped))
 
-        result = processed_shapes[0]
-        for s in processed_shapes[1:]:
-            result = result.fuse(s)
-        return result
+        result = processed_solids[0]
+        for s in processed_solids[1:]:
+            try:
+                result = result.fuse(s)
+            except Exception as e:
+                print(f"Warning: OCC boolean fuse iteration failed, skipping component. {e}")
+        return getattr(result, "wrapped", result)
 
     @staticmethod
     def make_compound(shapes):

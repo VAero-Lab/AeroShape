@@ -29,16 +29,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = [
-    "streamlit>=1.20",
-    "plotly>=5.0",
-    "pandas>=1.3",
+test = [
+    "pytest>=7.0",
 ]
 viz = [
     "matplotlib>=3.5.0",
 ]
+mesh = [
+    "pyCGNS>=6.0",
+]
 all = [
-    "aeroshape[gui,viz]",
+    "aeroshape[viz,mesh,test]",
 ]
 
 [project.urls]

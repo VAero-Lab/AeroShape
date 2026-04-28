@@ -182,7 +182,7 @@ class MultiSegmentFuselage:
         wires = self._build_wires_from_frames(frames)
         return NurbsSurfaceBuilder.loft(wires, solid=True, ruled=False)
 
-    def to_occ_segments(self, solid=True, max_sections=15):
+    def to_occ_segments(self, solid=False, max_sections=15):
         """Build individual NURBS lofts for each segment, splitting large ones.
 
         Returns

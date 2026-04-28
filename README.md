@@ -19,24 +19,44 @@ As the library continues to expand, AeroShape aims to become a fully comprehensi
 - **Native Symmetry Handling** — Automatic mirroring of wings and stabilizers across the XZ plane.
 - **Complex Assembly Aggregation** — Multi-body property integration (Volume, Mass, CG, Inertia) via `AircraftModel`.
 - **Advanced Volume Computation** — Hybrid GVM/OCC methodology choosing between speed and fidelity.
-- **Optimized CAD Export** — Assembly-aware STEP (via XDE), IGES, STL, and BREP formats.
-- **Visualization** — Interactive high-fidelity 3D viewer (Plotly/build123d) and static figures.
+- **Optimized CAD/Mesh Export** — Assembly-aware STEP (via XDE), IGES, STL, BREP, and compliant CGNS unstructured formats.
+- **Interactive 3D Visualization** — VTK-based interactive CAD viewer with on-screen property annotations.
 
 ---
 
 ## Installation
 
+AeroShape relies on OpenCascade (via `build123d` and `cadquery-ocp`) to perform complex NURBS lofting and boolean operations. Follow these steps to ensure a robust environment setup.
+
+### 1. Prerequisites (OpenCascade)
+The easiest way to install the required OCC backend is using `conda` or `mamba`. 
+
 ```bash
-# Core package (Includes: build123d, plotly, numpy, scipy)
+# Create a new environment
+conda create -n aeroshape-env python=3.10
+conda activate aeroshape-env
+
+# Install the OpenCascade backend (cadquery-ocp)
+conda install -c conda-forge cadquery-ocp
+```
+
+### 2. Install AeroShape
+Clone the repository and install the Python package.
+
+```bash
+git clone https://github.com/victor-alulema/aeroshape.git
+cd aeroshape
+
+# Install the core package
 pip install -e .
 
-# With GUI support (streamlit, pandas)
-pip install -e ".[gui]"
-
-# With extra visualization support (matplotlib)
+# (Optional) Install visualization tools (matplotlib)
 pip install -e ".[viz]"
 
-# All-in-one
+# (Optional) Install mesh export tools (pyCGNS)
+pip install -e ".[mesh]"
+
+# Install everything
 pip install -e ".[all]"
 ```
 
@@ -44,7 +64,7 @@ pip install -e ".[all]"
 
 ## Quick Start
 
-### Using AircraftModel
+AeroShape makes it easy to build lifting surfaces, construct an aircraft assembly, and extract physical properties.
 
 ```python
 from aeroshape import (
@@ -71,7 +91,7 @@ wing.add_segment(SegmentSpec(
 ac = AircraftModel("Symmetric UAV")
 ac.add_wing(wing, origin=(1.0, 0.0, 0.0))
 
-# High-fidelity analysis (100x faster than legacy OCC)
+# High-fidelity parallel OCC analysis (near-instantaneous)
 props = ac.compute_properties(method='occ', density=2700.0, uproc=True, tolerance=0.1)
 
 print(f"Volume: {props['volume']:.6f} m³")
@@ -83,26 +103,19 @@ if __name__ == "__main__":
                      props['cg'], props['inertia'], title=ac.name)
 ```
 
-### NURBS Export
+### CAD and Mesh Export
 
-AeroShape uses an assembly-aware XDE (Extended Data Exchange) writer for high-performance STEP export, preserving the logical structure of the aircraft.
+AeroShape natively exports to high-fidelity STEP files preserving assembly hierarchy, as well as computational meshes suitable for aerodynamics.
 
 ```python
-from aeroshape import NurbsExporter
+from aeroshape.nurbs.export import NurbsExporter
 
-# Full symmetric assembly export to STEP
+# 1. Full symmetric assembly export to STEP
 shape = ac.to_occ_shape() 
 NurbsExporter.to_step(shape, "Exports/full_model.step")
-```
 
-All exported files are saved to the **`Exports/`** directory.
-
-### Interactive GUI
-
-Launch the Streamlit dashboard for real-time parametric modeling and 3D visualization:
-
-```bash
-streamlit run app.py
+# 2. Export structured aerodynamic mesh to SIDS-compliant CGNS
+ac.export_mesh_cgns("Exports/model_mesh.cgns", closed=True)
 ```
 
 ---
@@ -123,6 +136,7 @@ aeroshape/
   nurbs/
     surfaces.py       # NurbsSurfaceBuilder — B-spline lofting
     export.py         # NurbsExporter — STEP/IGES/STL
+    mesh_export.py    # MeshExporter — pyCGNS and binary STL formats
   visualization/
     rendering.py      # show_interactive / show_static
 ```
@@ -137,20 +151,18 @@ Run any example from the project root:
 python examples/<script>.py
 ```
 
+### Prominent Examples
+
 | Script                            | Description                                                            |
 | --------------------------------- | ---------------------------------------------------------------------- |
-| `aircraft_commercial_airliner.py` | Large twin-jet airliner with complex winglets and tapered fuselage     |
-| `aircraft_bwb_guided.py`          | Blended-Wing-Body using spline guide curves and native symmetry        |
-| `aircraft_box_wing.py`            | Prandtl-plane box-wing with smooth G1-continuous vertical fins         |
-| `aircraft_military_cargo.py`      | High-wing cargo aircraft with T-tail and heavy-lift fuselage           |
-| `aircraft_twin_boom.py`           | Twin-boom configuration demonstrating multi-body coordinate mapping    |
-| `aircraft_uav_bwb.py`             | Flying-wing UAV with flattened stealth body and high-dihedral tips     |
-| `aircraft_experimental_glider.py` | High-aspect ratio glider with extreme spanwise clustering requirements |
-| `clustering_laws.py`              | Visualise point-distribution laws (uniform, cosine, tanh, Vinokur)     |
-| `analytical_validation.py`        | Convergence study comparing GVM vs analytical solutions                |
-| `run_gui.py`                      | Launch the Streamlit interactive dashboard                             |
+| `aircraft_commercial_airliner.py` | Constructs a large twin-jet airliner with complex winglets, vertical stabilizers, and a tapered fuselage. Demonstrates managing complex multi-body hierarchies. |
+| `aircraft_bwb_guided.py`          | Creates a Blended-Wing-Body using mathematical spline guide curves instead of discrete segments. Demonstrates perfectly smooth G1/C2 continuous swept lofts. |
+| `aircraft_box_wing.py`            | A Prandtl-plane box-wing aircraft featuring smooth G1-continuous vertical connecting fins between the upper and lower wings. |
+| `aircraft_military_cargo.py`      | High-wing cargo aircraft with a T-tail configuration and a heavy-lift blended fuselage. |
+| `export_mesh_demo.py`             | Demonstrates extracting structured triangulation grids and exporting them directly to unstructured **CGNS** and **STL** formats for CFD or FEM workflows. |
+| `analytical_validation.py`        | A convergence study validating the GVM methodology against known analytical solutions. |
 
-All scripts that export CAD geometry write their output files to the `Exports/` directory.
+All scripts that export geometry will automatically write their output files to the `Exports/` directory in the root of the project.
 
 ---
 

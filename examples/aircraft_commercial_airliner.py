@@ -118,11 +118,17 @@ def main():
     # Native representation STEP export (optimized assembly-aware writer)
     from aeroshape.nurbs.export import NurbsExporter
     os.makedirs("Exports", exist_ok=True)
-    step_path = "Exports/aircraft_commercial_airliner.step"
-    NurbsExporter.to_step(ac.to_occ_shape(), step_path)
+    if "--oml" in sys.argv:
+        oml_path = "Exports/aircraft_commercial_airliner_oml.step"
+        ac.export_oml(oml_path)
+        print(f"Exported watertight OML to {oml_path}")
+    else:
+        step_path = "Exports/aircraft_commercial_airliner.step"
+        NurbsExporter.to_step(ac.to_occ_shape(), step_path)
+        print(f"Exported High-Fidelity CAD (STEP) to {step_path}")
+        
     end_time3 = time.time()
     print(f"Time to export STEP: {end_time3 - start_time3:.2f} seconds")
-    print(f"Exported High-Fidelity CAD (STEP) to {step_path}")
 
     if "--no-show" not in sys.argv:
         ac.show()

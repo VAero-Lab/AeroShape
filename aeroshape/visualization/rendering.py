@@ -86,7 +86,7 @@ def _configure_view(ax, all_pts, elev, azim):
 
 
 # =====================================================================
-#  Interactive 3-D viewer  (Plotly)
+#  Interactive 3-D viewer
 # =====================================================================
 
 def show_interactive(

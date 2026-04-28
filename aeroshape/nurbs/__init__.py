@@ -2,6 +2,7 @@
 
 from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
 from aeroshape.nurbs.export import NurbsExporter
+from aeroshape.nurbs.mesh_export import MeshExporter
 from aeroshape.nurbs.utils import (
     tessellate_shape,
     sample_shape_grid,
@@ -13,6 +14,7 @@ from aeroshape.nurbs.utils import (
 __all__ = [
     "NurbsSurfaceBuilder",
     "NurbsExporter",
+    "MeshExporter",
     "tessellate_shape",
     "sample_shape_grid",
     "occ_mass_properties",

@@ -203,7 +203,7 @@ class MultiSegmentWing:
         from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
         return NurbsSurfaceBuilder.build(self)
 
-    def to_occ_segments(self, max_sections=15, spanwise_clustering=None):
+    def to_occ_segments(self, max_sections=15, spanwise_clustering=None, solid=False):
         """Build individual NURBS lofts for cada segment, splitting large ones.
 
         Returns
@@ -241,7 +241,7 @@ class MultiSegmentWing:
                         two_edges=True
                     )
                     wires.append(wire)
-                segments.append(NurbsSurfaceBuilder.loft(wires, solid=True))
+                segments.append(NurbsSurfaceBuilder.loft(wires, solid=solid))
             
             i = j - 1 # Next chunk starts at last frame of current chunk
             
@@ -581,6 +581,72 @@ class MultiSegmentWing:
                                          chordwise_clustering)
         return MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=closed)
 
+    # ── Structured mesh export ─────────────────────────────────────
+
+    def export_mesh_stl(self, filepath, num_points_profile=80, closed=True,
+                        spanwise_clustering=None, chordwise_clustering=None):
+        """Export the structured visualization mesh to binary STL.
+
+        Writes the same triangulated surface used for rendering.  The mesh
+        has well-defined chordwise × spanwise topology suitable for FEM/CFD
+        surface meshing.
+
+        Parameters
+        ----------
+        filepath : str
+            Output ``.stl`` file path.
+        num_points_profile : int
+            Number of chordwise points per profile.
+        closed : bool
+            If True (default), include end-cap triangles for a watertight
+            mesh.  Set to False for thin-shell exports.
+        spanwise_clustering : callable or None
+            Distribution law for spanwise section spacing.
+        chordwise_clustering : callable or None
+            Distribution law for chordwise point spacing.
+        """
+        from aeroshape.nurbs.mesh_export import MeshExporter
+
+        triangles = self.to_triangles(
+            num_points_profile=num_points_profile,
+            closed=closed,
+            spanwise_clustering=spanwise_clustering,
+            chordwise_clustering=chordwise_clustering,
+        )
+        MeshExporter.to_stl(triangles, filepath, name=self.name)
+
+    def export_mesh_cgns(self, filepath, num_points_profile=80, closed=True,
+                         spanwise_clustering=None, chordwise_clustering=None):
+        """Export the structured visualization mesh to CGNS format.
+
+        Writes a CGNS/HDF5 file with a single unstructured zone containing
+        TRI_3 surface elements.  The mesh topology matches the rendering
+        exactly.  Requires ``h5py``.
+
+        Parameters
+        ----------
+        filepath : str
+            Output ``.cgns`` file path.
+        num_points_profile : int
+            Number of chordwise points per profile.
+        closed : bool
+            If True (default), include end-cap triangles for a watertight
+            mesh.  Set to False for thin-shell exports.
+        spanwise_clustering : callable or None
+            Distribution law for spanwise section spacing.
+        chordwise_clustering : callable or None
+            Distribution law for chordwise point spacing.
+        """
+        from aeroshape.nurbs.mesh_export import MeshExporter
+
+        X, Y, Z = self.to_vertex_grids(
+            num_points_profile=num_points_profile,
+            spanwise_clustering=spanwise_clustering,
+            chordwise_clustering=chordwise_clustering,
+        )
+        grids = [(X, Y, Z, self.name, closed)]
+        MeshExporter.to_cgns(grids, filepath)
+
     # ── Property computation ────────────────────────────────────────
 
     def compute_properties(self, method="gvm", density=1.0,
@@ -619,7 +685,7 @@ class MultiSegmentWing:
                 from aeroshape.nurbs.utils import occ_mass_properties
                 from multiprocessing import Pool, cpu_count
                 
-                segments = self.to_occ_segments()
+                segments = self.to_occ_segments(solid=True)
                 with Pool(processes=cpu_count()) as pool:
                     results = pool.starmap(occ_mass_properties, [(s, density, tolerance) for s in segments])
                 

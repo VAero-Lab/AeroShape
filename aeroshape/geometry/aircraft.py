@@ -139,9 +139,80 @@ class AircraftModel:
             shapes.append(occ_shape)
 
         if fuse:
-            return NurbsSurfaceBuilder.fuse_shapes(shapes)
+            return NurbsSurfaceBuilder.generate_oml(shapes)
         else:
             return NurbsSurfaceBuilder.make_compound(shapes)
+
+    def export_oml(self, filepath):
+        """Export a mathematically watertight CFD-ready Outer Mold Line.
+        
+        Evaluates the geometry internally enforcing explicitly capped solid bodies,
+        and fuses them perfectly overlapping to remove all internal framework.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to write the resulting STEP exported solid geometry.
+        """
+        from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
+        from aeroshape.nurbs.export import NurbsExporter
+        import os
+        from OCP.gp import gp_Trsf, gp_Vec
+        from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+
+        shapes = []
+
+        # Force Solid=True internally and fetch TopoDS
+        # Wings
+        for entry in self.surfaces:
+            wing = entry["wing"]
+            ox, oy, oz = entry["origin"]
+            # Enforce solid bounding caps for explicit volumetric fusion
+            segs = wing.to_occ_segments(solid=True)
+            for seg in segs:
+                occ_shape = getattr(seg, "wrapped", seg)
+                
+                # Assembly Translation
+                if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
+                    trsf = gp_Trsf()
+                    trsf.SetTranslation(gp_Vec(ox, oy, oz))
+                    occ_shape = BRepBuilderAPI_Transform(occ_shape, trsf, True).Shape()
+                shapes.append(occ_shape)
+
+                # Append symmetric mirrored copy dynamically
+                if wing.symmetric:
+                    from OCP.gp import gp_Ax2, gp_Pnt, gp_Dir
+                    mirror_trsf = gp_Trsf()
+                    mirror_trsf.SetMirror(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 1, 0)))
+                    mirrored = BRepBuilderAPI_Transform(getattr(seg, "wrapped", seg), mirror_trsf, False).Shape()
+                    
+                    if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
+                        trsf2 = gp_Trsf()
+                        trsf2.SetTranslation(gp_Vec(ox, -oy, oz))
+                        mirrored = BRepBuilderAPI_Transform(mirrored, trsf2, True).Shape()
+                    shapes.append(mirrored)
+
+        # Fuselages
+        for entry in self.fuselages:
+            fuse = entry["fuselage"]
+            ox, oy, oz = entry["origin"]
+            # Force Solid bounding caps for the fuselage string
+            segs = fuse.to_occ_segments(solid=True)
+            for seg in segs:
+                occ_shape = getattr(seg, "wrapped", seg)
+                if abs(ox) > 1e-10 or abs(oy) > 1e-10 or abs(oz) > 1e-10:
+                    trsf = gp_Trsf()
+                    trsf.SetTranslation(gp_Vec(ox, oy, oz))
+                    occ_shape = BRepBuilderAPI_Transform(occ_shape, trsf, True).Shape()
+                shapes.append(occ_shape)
+
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        # Execute unified OML generation stripping internal bounds
+        oml_solid = NurbsSurfaceBuilder.generate_oml(shapes)
+        if oml_solid:
+            NurbsExporter.to_step(oml_solid, filepath)
+        else:
+            print("Failed to generate OML solid representation.")
 
     def to_vertex_grids_list(self, num_points_profile=50,
                              spanwise_clustering=None,
@@ -201,6 +272,99 @@ class AircraftModel:
             all_triangles.extend(tris)
             
         return all_triangles
+
+    # ── Structured mesh export ─────────────────────────────────────
+
+    def _wing_grids_for_export(self, num_points_profile=80, closed=True,
+                                spanwise_clustering=None,
+                                chordwise_clustering=None):
+        """Collect vertex grids from wing/tail surfaces only (one half if symmetric).
+
+        Fuselages are excluded because this export targets surface meshes
+        suitable for aerodynamic analysis.
+
+        Returns
+        -------
+        list of tuple
+            Each element is ``(X, Y, Z, zone_name, closed)``.
+        """
+        result = []
+        for entry in self.surfaces:
+            wing = entry["wing"]
+            ox, oy, oz = entry["origin"]
+            X, Y, Z = wing.to_vertex_grids(
+                num_points_profile,
+                spanwise_clustering,
+                chordwise_clustering,
+            )
+            # Apply origin offset
+            result.append((X + ox, Y + oy, Z + oz, wing.name, closed))
+        return result
+
+    def export_mesh_stl(self, filepath, num_points_profile=80, closed=True,
+                        spanwise_clustering=None, chordwise_clustering=None):
+        """Export structured visualization mesh to binary STL.
+
+        Exports only wing/tail surfaces (not fuselages).  If a surface
+        has ``symmetric=True``, only the starboard half is exported.
+
+        Parameters
+        ----------
+        filepath : str
+            Output ``.stl`` file path.
+        num_points_profile : int
+            Number of chordwise points per profile.
+        closed : bool
+            If True (default), include end-cap triangles for watertight mesh.
+        spanwise_clustering : callable or None
+            Distribution law for spanwise section spacing.
+        chordwise_clustering : callable or None
+            Distribution law for chordwise point spacing.
+        """
+        from aeroshape.nurbs.mesh_export import MeshExporter
+        from aeroshape.analysis.mesh import MeshTopologyManager
+
+        grids = self._wing_grids_for_export(
+            num_points_profile, closed,
+            spanwise_clustering, chordwise_clustering,
+        )
+
+        all_triangles = []
+        for X, Y, Z, name, cl in grids:
+            tris = MeshTopologyManager.get_wing_triangles(X, Y, Z, closed=cl)
+            all_triangles.extend(tris)
+
+        MeshExporter.to_stl(all_triangles, filepath, name=self.name)
+
+    def export_mesh_cgns(self, filepath, num_points_profile=80, closed=True,
+                         spanwise_clustering=None, chordwise_clustering=None):
+        """Export structured visualization mesh to CGNS format.
+
+        Each wing/tail surface becomes a separate CGNS zone (multi-zone
+        file).  Fuselages are excluded.  If a surface has
+        ``symmetric=True``, only the starboard half is exported.
+        Requires ``h5py``.
+
+        Parameters
+        ----------
+        filepath : str
+            Output ``.cgns`` file path.
+        num_points_profile : int
+            Number of chordwise points per profile.
+        closed : bool
+            If True (default), include end-cap triangles for watertight mesh.
+        spanwise_clustering : callable or None
+            Distribution law for spanwise section spacing.
+        chordwise_clustering : callable or None
+            Distribution law for chordwise point spacing.
+        """
+        from aeroshape.nurbs.mesh_export import MeshExporter
+
+        grids = self._wing_grids_for_export(
+            num_points_profile, closed,
+            spanwise_clustering, chordwise_clustering,
+        )
+        MeshExporter.to_cgns(grids, filepath, base_name=self.name)
 
     def compute_properties(self, method="gvm", density=1.0,
                            num_points_profile=50,
@@ -405,9 +569,9 @@ def _worker_compute_segment_props(task, density, tolerance):
     
     # 1. Build segment shape
     if comp_type == 'wing_seg':
-        segs = definition.to_occ_segments(spanwise_clustering=spanwise_clustering)
+        segs = definition.to_occ_segments(spanwise_clustering=spanwise_clustering, solid=True)
     else:
-        segs = definition.to_occ_segments() # Fuselage does not support clustering directly right now
+        segs = definition.to_occ_segments(solid=True) # Fuselage does not support clustering directly right now
         
     if seg_idx >= len(segs):
          return {"volume": 0.0, "mass": 0.0, "center_of_mass": (0,0,0), "inertia_matrix": np.zeros((3,3))}

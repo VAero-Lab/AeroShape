@@ -34,6 +34,7 @@ from aeroshape.geometry.aircraft import AircraftModel
 # CAD / NURBS operations
 from aeroshape.nurbs.surfaces import NurbsSurfaceBuilder
 from aeroshape.nurbs.export import NurbsExporter
+from aeroshape.nurbs.mesh_export import MeshExporter
 from aeroshape.nurbs.utils import (
     tessellate_shape, sample_shape_grid, occ_mass_properties,
     make_wire_from_points, make_line_wire,
@@ -59,6 +60,7 @@ __all__ = [
     # CAD / NURBS operations
     "NurbsSurfaceBuilder",
     "NurbsExporter",
+    "MeshExporter",
     "tessellate_shape",
     "sample_shape_grid",
     "occ_mass_properties",
