@@ -29,7 +29,8 @@ As the library continues to expand, AeroShape aims to become a fully comprehensi
 AeroShape relies on OpenCascade (via `build123d` and `cadquery-ocp`) to perform complex NURBS lofting and boolean operations. Follow these steps to ensure a robust environment setup.
 
 ### 1. Prerequisites (OpenCascade)
-The easiest way to install the required OCC backend is using `conda` or `mamba`. 
+
+The easiest way to install the required OCC backend is using `conda` or `mamba`.
 
 ```bash
 # Create a new environment
@@ -41,11 +42,12 @@ conda install -c conda-forge cadquery-ocp
 ```
 
 ### 2. Install AeroShape
+
 Clone the repository and install the Python package.
 
 ```bash
-git clone https://github.com/victor-alulema/aeroshape.git
-cd aeroshape
+git clone https://github.com/VAero-Lab/AeroShape.git
+cd AeroShape
 
 # Install the core package
 pip install -e .
@@ -111,7 +113,7 @@ AeroShape natively exports to high-fidelity STEP files preserving assembly hiera
 from aeroshape.nurbs.export import NurbsExporter
 
 # 1. Full symmetric assembly export to STEP
-shape = ac.to_occ_shape() 
+shape = ac.to_occ_shape()
 NurbsExporter.to_step(shape, "Exports/full_model.step")
 
 # 2. Export structured aerodynamic mesh to SIDS-compliant CGNS
@@ -153,14 +155,14 @@ python examples/<script>.py
 
 ### Prominent Examples
 
-| Script                            | Description                                                            |
-| --------------------------------- | ---------------------------------------------------------------------- |
+| Script                            | Description                                                                                                                                                     |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `aircraft_commercial_airliner.py` | Constructs a large twin-jet airliner with complex winglets, vertical stabilizers, and a tapered fuselage. Demonstrates managing complex multi-body hierarchies. |
-| `aircraft_bwb_guided.py`          | Creates a Blended-Wing-Body using mathematical spline guide curves instead of discrete segments. Demonstrates perfectly smooth G1/C2 continuous swept lofts. |
-| `aircraft_box_wing.py`            | A Prandtl-plane box-wing aircraft featuring smooth G1-continuous vertical connecting fins between the upper and lower wings. |
-| `aircraft_military_cargo.py`      | High-wing cargo aircraft with a T-tail configuration and a heavy-lift blended fuselage. |
-| `export_mesh_demo.py`             | Demonstrates extracting structured triangulation grids and exporting them directly to unstructured **CGNS** and **STL** formats for CFD or FEM workflows. |
-| `analytical_validation.py`        | A convergence study validating the GVM methodology against known analytical solutions. |
+| `aircraft_bwb_guided.py`          | Creates a Blended-Wing-Body using mathematical spline guide curves instead of discrete segments. Demonstrates perfectly smooth G1/C2 continuous swept lofts.    |
+| `aircraft_box_wing.py`            | A Prandtl-plane box-wing aircraft featuring smooth G1-continuous vertical connecting fins between the upper and lower wings.                                    |
+| `aircraft_military_cargo.py`      | High-wing cargo aircraft with a T-tail configuration and a heavy-lift blended fuselage.                                                                         |
+| `export_mesh_demo.py`             | Demonstrates extracting structured triangulation grids and exporting them directly to unstructured **CGNS** and **STL** formats for CFD or FEM workflows.       |
+| `analytical_validation.py`        | A convergence study validating the GVM methodology against known analytical solutions.                                                                          |
 
 All scripts that export geometry will automatically write their output files to the `Exports/` directory in the root of the project.
 
